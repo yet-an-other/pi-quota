@@ -6,6 +6,9 @@
  * has actually replenished quota.
  */
 
+/** Reads the current time as Unix epoch seconds. */
+export type NowSeconds = () => number;
+
 /** Formats elapsed time compactly for diagnostic freshness metadata. */
 export function formatAge(ageSeconds: number): string {
   const seconds = Math.max(0, Math.floor(ageSeconds));

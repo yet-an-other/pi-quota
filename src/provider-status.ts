@@ -1,7 +1,9 @@
 /**
- * Provider status core: routes supported providers to their adapters and
- * renders lifecycle-owned quota state. Scheduling and state live in the quota
- * lifecycle module; provider-specific endpoint behavior stays in adapters.
+ * Provider status dispatch: routes supported providers to their adapters.
+ * Owns the narrow structural seam over the Pi host shared by the lifecycle
+ * and the status presenter. Scheduling and state live in the quota lifecycle
+ * module; provider-specific endpoint behavior stays in adapters; host
+ * presentation lives in the status presenter.
  */
 
 import {
@@ -20,9 +22,7 @@ import {
   ZAI_PROVIDER,
 } from "./providers/zai.ts";
 import type { QuotaSnapshot, UnavailableReason } from "./quota-contract.ts";
-import { renderQuotaStatus } from "./quota-render.ts";
-
-export const PROVIDER_STATUS_ID = "pi-quota";
+import type { NowSeconds } from "./quota-time.ts";
 
 /** Minimal resolved-auth shape needed from Pi's provider auth registry. */
 export interface ResolvedProviderAuth {
@@ -48,9 +48,7 @@ export interface ProviderStatusHost {
 
 export interface ProviderStatusDeps {
   readonly fetchFn: typeof fetch;
-  nowSeconds(): number;
-  /** Available footer width in columns; undefined means unbounded. */
-  readonly width?: number;
+  readonly nowSeconds: NowSeconds;
 }
 
 export function isSupportedProvider(provider: string | undefined): provider is string {
@@ -97,33 +95,4 @@ export async function fetchProviderQuotaSnapshot(
     : provider === KIMI_PROVIDER
       ? fetchKimiQuotaSnapshot(adapterDeps)
       : fetchZaiQuotaSnapshot({ ...adapterDeps, providerBaseUrl: host.providerBaseUrl });
-}
-
-export function clearProviderStatus(host: ProviderStatusHost): void {
-  if (host.mode === "tui") host.ui.setStatus(PROVIDER_STATUS_ID, undefined);
-}
-
-export function renderProviderStatus(
-  host: ProviderStatusHost,
-  snapshot: QuotaSnapshot,
-  deps: Pick<ProviderStatusDeps, "nowSeconds" | "width">,
-  stale: boolean,
-): void {
-  if (host.mode !== "tui") return;
-
-  const rendered = renderQuotaStatus(snapshot, {
-    nowSeconds: deps.nowSeconds(),
-    width: deps.width,
-    stale,
-  });
-  if (rendered === undefined) {
-    clearProviderStatus(host);
-    return;
-  }
-
-  const glyphColor =
-    rendered.tone === "stale" ? "warning" : rendered.tone === "muted" ? "muted" : "accent";
-  const textColor = rendered.tone === "stale" ? "muted" : "dim";
-  const glyph = host.theme.fg(glyphColor, rendered.glyph);
-  host.ui.setStatus(PROVIDER_STATUS_ID, `${glyph} ${host.theme.fg(textColor, rendered.text)}`);
 }

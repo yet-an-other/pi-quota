@@ -10,14 +10,17 @@
 
 import type { QuotaSnapshot } from "./quota-contract.ts";
 import {
-  clearProviderStatus,
   fetchProviderQuotaSnapshot,
   isSupportedProvider,
-  renderProviderStatus,
   unavailableProviderQuotaSnapshot,
   type ProviderStatusDeps,
   type ProviderStatusHost,
 } from "./provider-status.ts";
+import {
+  clearProviderStatus,
+  renderProviderStatus,
+  type StatusPresenterDeps,
+} from "./status-presenter.ts";
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const AUTOMATIC_THROTTLE_SECONDS = 60;
@@ -42,7 +45,7 @@ export type QuotaLifecycleHost = ProviderStatusHost;
 /** Returns a cancellation function for this request-scoped timeout. */
 export type ScheduleTimeout = (callback: () => void, delayMilliseconds: number) => () => void;
 
-export interface QuotaLifecycleDeps extends ProviderStatusDeps {
+export interface QuotaLifecycleDeps extends ProviderStatusDeps, StatusPresenterDeps {
   readonly timeoutMs?: number;
   readonly scheduleTimeout?: ScheduleTimeout;
   /** Provider adapter seam; defaults to the built-in provider router. */
