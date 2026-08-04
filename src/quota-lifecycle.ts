@@ -15,7 +15,7 @@ import {
   unavailableProviderQuotaSnapshot,
   type ProviderStatusDeps,
   type ProviderStatusHost,
-} from "./provider-status.ts";
+} from "./provider-registry.ts";
 import {
   clearProviderStatus,
   renderProviderStatus,

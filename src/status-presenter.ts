@@ -6,7 +6,7 @@
  * status calls.
  */
 
-import type { ProviderStatusHost } from "./provider-status.ts";
+import type { ProviderStatusHost } from "./provider-registry.ts";
 import type { QuotaSnapshot } from "./quota-contract.ts";
 import { renderQuotaStatus } from "./quota-render.ts";
 import type { NowSeconds } from "./quota-time.ts";

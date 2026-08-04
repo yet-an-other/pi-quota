@@ -1,14 +1,15 @@
 /**
- * Provider registry: the single ordered list of supported provider adapters.
+ * Provider registry and dispatch: the single ordered list of supported
+ * provider adapters, and the routing of the active provider to its adapter.
  *
  * Each adapter contributes one descriptor — id, display label, fetch
  * behavior, and unavailable-snapshot behavior — behind a shared dependencies
  * shape. Everything that enumerates providers derives from this list, so
- * adding a provider means registering one descriptor here.
- *
- * Expand phase: the dispatch chains in provider-status and the
- * supported-providers list still serve callers until the contract step
- * switches them to this registry and deletes them.
+ * adding a provider means registering one descriptor here. This module also
+ * owns the narrow structural seam over the Pi host shared by the lifecycle
+ * and the status presenter. Scheduling and state live in the quota lifecycle
+ * module; provider-specific endpoint behavior stays in adapters; host
+ * presentation lives in the status presenter.
  */
 
 import {
@@ -29,8 +30,10 @@ import {
 import type {
   ProviderAdapterDeps,
   QuotaSnapshot,
+  ResolvedProviderAuth,
   UnavailableReason,
 } from "./quota-contract.ts";
+import type { NowSeconds } from "./quota-time.ts";
 
 /** A provider's quota behavior behind one descriptor. */
 export interface ProviderAdapter {
@@ -67,4 +70,59 @@ const adaptersById = new Map(PROVIDER_ADAPTERS.map((adapter) => [adapter.id, ada
 /** Looks up the adapter for a provider id; undefined when unsupported. */
 export function providerAdapter(id: string | undefined): ProviderAdapter | undefined {
   return id === undefined ? undefined : adaptersById.get(id);
+}
+
+/** Narrow structural seam over the Pi host so tests can mock it. */
+export interface ProviderStatusHost {
+  readonly mode: string;
+  readonly provider: string | undefined;
+  /** Effective base URL of the active model, supplied by Pi. */
+  readonly providerBaseUrl: string | undefined;
+  readonly ui: {
+    setStatus(id: string, text: string | undefined): void;
+  };
+  readonly theme: {
+    fg(color: string, text: string): string;
+  };
+  resolveAuth(provider: string): Promise<ResolvedProviderAuth | undefined>;
+}
+
+export interface ProviderStatusDeps {
+  readonly fetchFn: typeof fetch;
+  readonly nowSeconds: NowSeconds;
+}
+
+export function isSupportedProvider(provider: string | undefined): provider is string {
+  return providerAdapter(provider) !== undefined;
+}
+
+export function unavailableProviderQuotaSnapshot(
+  provider: string,
+  reason: UnavailableReason,
+  fetchedAtSeconds: number,
+): QuotaSnapshot | undefined {
+  return providerAdapter(provider)?.unavailable(reason, fetchedAtSeconds);
+}
+
+export async function fetchProviderQuotaSnapshot(
+  host: ProviderStatusHost,
+  deps: ProviderStatusDeps,
+  signal: AbortSignal,
+): Promise<QuotaSnapshot | undefined> {
+  const adapter = providerAdapter(host.provider);
+  if (adapter === undefined) return undefined;
+
+  const resolveAuth = async () => {
+    const auth = await host.resolveAuth(adapter.id);
+    return auth === undefined
+      ? undefined
+      : { ...auth, baseUrl: auth.baseUrl ?? host.providerBaseUrl };
+  };
+  return adapter.fetch({
+    providerBaseUrl: host.providerBaseUrl,
+    resolveAuth,
+    fetchFn: deps.fetchFn,
+    nowSeconds: deps.nowSeconds,
+    signal,
+  });
 }

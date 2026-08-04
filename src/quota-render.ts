@@ -15,7 +15,7 @@ import {
   type UnavailableReason,
 } from "./quota-contract.ts";
 import { formatAge, formatResetCountdown, formatTimestamp } from "./quota-time.ts";
-import { SUPPORTED_PROVIDERS } from "./supported-providers.ts";
+import { PROVIDER_ADAPTERS } from "./provider-registry.ts";
 import type { QuotaState } from "./quota-lifecycle.ts";
 
 export const QUOTA_GLYPH = "◷";
@@ -122,7 +122,7 @@ export function renderQuotaDetails(
   return [
     "Quota details",
     "",
-    ...SUPPORTED_PROVIDERS.flatMap(({ id, label }) => [
+    ...PROVIDER_ADAPTERS.flatMap(({ id, label }) => [
       `${label}${id === activeProvider ? " (active)" : ""}`,
       ...providerDetailLines(statesByProvider.get(id), nowSeconds),
       "",

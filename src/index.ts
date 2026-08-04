@@ -11,9 +11,8 @@ import {
   type QuotaLifecycleHost,
   type ScheduleTimeout,
 } from "./quota-lifecycle.ts";
-import { isSupportedProvider } from "./provider-status.ts";
+import { isSupportedProvider, PROVIDER_ADAPTERS } from "./provider-registry.ts";
 import { renderQuotaDetails } from "./quota-render.ts";
-import { SUPPORTED_PROVIDERS } from "./supported-providers.ts";
 
 export interface PiQuotaDeps {
   readonly fetchFn?: typeof fetch;
@@ -100,7 +99,7 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
         return;
       }
 
-      const hosts = SUPPORTED_PROVIDERS.map(({ id }) => {
+      const hosts = PROVIDER_ADAPTERS.map(({ id }) => {
         const baseUrl = ctx.model?.provider === id
           ? ctx.model.baseUrl
           : ctx.modelRegistry.getProvider(id)?.baseUrl;
