@@ -2,9 +2,10 @@
  * Provider-agnostic quota refresh lifecycle and session-memory quota state.
  *
  * The lifecycle is event-driven: session/model activation starts one refresh,
- * settled activity may start a throttled refresh, and shutdown cancels work.
- * It owns timeout, coalescing, cancellation, stale fallback, and failure
- * backoff. No timers survive an in-flight request.
+ * settled activity may start a throttled refresh, diagnostics lazily fetch
+ * missing providers, and shutdown cancels work. It owns timeout, coalescing,
+ * cancellation, stale fallback, and failure backoff. No timers survive an
+ * in-flight request.
  */
 
 import type { QuotaSnapshot } from "./quota-contract.ts";
@@ -53,6 +54,12 @@ interface InFlightRequest {
   readonly controller: AbortController;
   readonly cancelTimeout: () => void;
   readonly cancelExternalAbort: () => void;
+  readonly renderFooter: boolean;
+}
+
+interface InFlightEntry {
+  readonly request: InFlightRequest;
+  readonly promise: Promise<QuotaState | undefined>;
 }
 
 function defaultScheduleTimeout(callback: () => void, delayMilliseconds: number): () => void {
@@ -84,8 +91,8 @@ function aborted(signal: AbortSignal): Promise<never> {
 export class QuotaLifecycle {
   private readonly deps: QuotaLifecycleDeps;
   private readonly states = new Map<string, QuotaState>();
+  private readonly inFlight = new Map<string, InFlightEntry>();
   private activeHost: QuotaLifecycleHost | undefined;
-  private inFlight: InFlightRequest | undefined;
 
   constructor(deps: QuotaLifecycleDeps) {
     this.deps = deps;
@@ -93,17 +100,21 @@ export class QuotaLifecycle {
 
   /** Starts a fresh session-memory lifecycle and refreshes a supported provider. */
   sessionStart(host: QuotaLifecycleHost, signal?: AbortSignal): void {
-    this.abortInFlight();
+    this.abortAllInFlight();
     this.states.clear();
     this.activate(host, signal);
   }
 
-  /** Switches active provider, cancelling old work and clearing old UI first. */
+  /** Switches active provider, cancelling stale work and clearing old UI first. */
   modelSelect(host: QuotaLifecycleHost, signal?: AbortSignal): void {
     const previousProvider = this.activeHost?.provider;
-    this.abortInFlight();
-    if (previousProvider !== undefined) this.states.delete(previousProvider);
-    if (host.provider !== undefined) this.states.delete(host.provider);
+    this.abortAllInFlight();
+    if (
+      previousProvider !== undefined &&
+      this.states.get(previousProvider)?.current === undefined
+    ) {
+      this.states.delete(previousProvider);
+    }
     this.activate(host, signal);
   }
 
@@ -111,21 +122,70 @@ export class QuotaLifecycle {
   agentSettled(host: QuotaLifecycleHost, signal?: AbortSignal): void {
     if (!this.matchesActive(host)) return;
     this.activeHost = host;
-    this.startRefresh(host, false, signal);
+    this.startRefresh(host, false, true, true, signal);
+  }
+
+  /** Forces the active provider while coalescing with matching in-flight work. */
+  async manualRefresh(
+    host: QuotaLifecycleHost,
+    signal?: AbortSignal,
+  ): Promise<QuotaState | undefined> {
+    if (host.mode !== "tui" || !this.matchesActive(host)) return undefined;
+    return this.startRefresh(host, true, true, true, signal);
+  }
+
+  /**
+   * Returns all requested provider states, reusing completed snapshots and
+   * lazily fetching only providers that have never completed in this session.
+   */
+  async inspectProviders(
+    hosts: readonly QuotaLifecycleHost[],
+    signal?: AbortSignal,
+  ): Promise<readonly QuotaState[]> {
+    return Promise.all(hosts.map(async (host) => {
+      const provider = host.provider;
+      if (!isSupportedProvider(provider)) {
+        throw new Error("Diagnostics require a supported provider host");
+      }
+
+      const state = this.ensureState(provider);
+      if (state.current !== undefined) return state;
+
+      await this.startRefresh(
+        host,
+        true,
+        false,
+        this.matchesActive(host),
+        signal,
+      );
+      return this.states.get(provider) ?? state;
+    }));
   }
 
   /** Cancels session work and drops all in-memory quota state. */
   sessionShutdown(): void {
     const host = this.activeHost;
     this.activeHost = undefined;
-    this.abortInFlight();
+    this.abortAllInFlight();
     this.states.clear();
     if (host !== undefined) clearProviderStatus(host);
   }
 
-  /** Read-only state seam for later diagnostics and focused tests. */
+  /** Read-only state seam for diagnostics and focused tests. */
   getState(provider: string): QuotaState | undefined {
     return this.states.get(provider);
+  }
+
+  private ensureState(provider: string): QuotaState {
+    const existing = this.states.get(provider);
+    if (existing !== undefined) return existing;
+    const initial: QuotaState = {
+      provider,
+      stale: false,
+      consecutiveFailures: 0,
+    };
+    this.states.set(provider, initial);
+    return initial;
   }
 
   private activate(host: QuotaLifecycleHost, signal: AbortSignal | undefined): void {
@@ -135,14 +195,8 @@ export class QuotaLifecycle {
     if (host.mode !== "tui" || !isSupportedProvider(host.provider)) return;
 
     this.activeHost = host;
-    if (!this.states.has(host.provider)) {
-      this.states.set(host.provider, {
-        provider: host.provider,
-        stale: false,
-        consecutiveFailures: 0,
-      });
-    }
-    this.startRefresh(host, true, signal);
+    this.ensureState(host.provider);
+    this.startRefresh(host, true, true, true, signal);
   }
 
   private matchesActive(host: QuotaLifecycleHost): boolean {
@@ -156,22 +210,23 @@ export class QuotaLifecycle {
   private startRefresh(
     host: QuotaLifecycleHost,
     force: boolean,
+    requireActive: boolean,
+    renderFooter: boolean,
     externalSignal: AbortSignal | undefined,
-  ): void {
+  ): Promise<QuotaState | undefined> | undefined {
     const provider = host.provider;
-    if (!isSupportedProvider(provider) || !this.matchesActive(host)) return;
-
-    if (this.inFlight !== undefined) {
-      // One request per extension instance. Same-provider triggers coalesce;
-      // stale provider work is cancelled before activate() installs a host.
-      return;
+    if (!isSupportedProvider(provider) || (requireActive && !this.matchesActive(host))) {
+      return undefined;
     }
 
+    const existing = this.inFlight.get(provider);
+    if (existing !== undefined) return existing.promise;
+
     const state = this.states.get(provider);
-    if (state === undefined) return;
+    if (state === undefined) return undefined;
     const nowSeconds = this.deps.nowSeconds();
     if (!force && state.nextAutomaticAt !== undefined && nowSeconds < state.nextAutomaticAt) {
-      return;
+      return undefined;
     }
 
     const controller = new AbortController();
@@ -188,15 +243,17 @@ export class QuotaLifecycle {
       controller,
       cancelTimeout,
       cancelExternalAbort: () => externalSignal?.removeEventListener("abort", onExternalAbort),
+      renderFooter,
     };
-    this.inFlight = request;
-    void this.completeRefresh(request, host);
+    const promise = Promise.resolve().then(() => this.completeRefresh(request, host));
+    this.inFlight.set(provider, { request, promise });
+    return promise;
   }
 
   private async completeRefresh(
     request: InFlightRequest,
     host: QuotaLifecycleHost,
-  ): Promise<void> {
+  ): Promise<QuotaState | undefined> {
     let snapshot: QuotaSnapshot | undefined;
     try {
       snapshot = await Promise.race([
@@ -218,19 +275,12 @@ export class QuotaLifecycle {
       request.cancelExternalAbort();
     }
 
-    if (this.inFlight !== request) return;
-    this.inFlight = undefined;
-    if (
-      snapshot === undefined ||
-      this.activeHost === undefined ||
-      this.activeHost.provider !== request.provider ||
-      snapshot.provider !== request.provider
-    ) {
-      return;
-    }
+    if (this.inFlight.get(request.provider)?.request !== request) return undefined;
+    this.inFlight.delete(request.provider);
+    if (snapshot === undefined || snapshot.provider !== request.provider) return undefined;
 
     const previous = this.states.get(request.provider);
-    if (previous === undefined) return;
+    if (previous === undefined) return undefined;
 
     const completedAt = this.deps.nowSeconds();
     if (snapshot.status === "available" || snapshot.status === "degraded") {
@@ -244,8 +294,10 @@ export class QuotaLifecycle {
         nextAutomaticAt: completedAt + AUTOMATIC_THROTTLE_SECONDS,
       };
       this.states.set(request.provider, next);
-      renderProviderStatus(host, snapshot, this.deps, false);
-      return;
+      if (request.renderFooter && this.matchesActive(host)) {
+        renderProviderStatus(host, snapshot, this.deps, false);
+      }
+      return next;
     }
 
     const consecutiveFailures = previous.consecutiveFailures + 1;
@@ -261,17 +313,23 @@ export class QuotaLifecycle {
       nextAutomaticAt: completedAt + failureDelaySeconds(consecutiveFailures),
     };
     this.states.set(request.provider, next);
-    if (next.lastRenderable !== undefined) {
+    if (
+      request.renderFooter &&
+      this.matchesActive(host) &&
+      next.lastRenderable !== undefined
+    ) {
       renderProviderStatus(host, next.lastRenderable, this.deps, true);
     }
+    return next;
   }
 
-  private abortInFlight(): void {
-    const request = this.inFlight;
-    this.inFlight = undefined;
-    if (request === undefined) return;
-    request.cancelTimeout();
-    request.cancelExternalAbort();
-    request.controller.abort(new Error("Quota refresh cancelled"));
+  private abortAllInFlight(): void {
+    const requests = [...this.inFlight.values()].map(({ request }) => request);
+    this.inFlight.clear();
+    for (const request of requests) {
+      request.cancelTimeout();
+      request.cancelExternalAbort();
+      request.controller.abort(new Error("Quota refresh cancelled"));
+    }
   }
 }
