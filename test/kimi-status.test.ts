@@ -28,7 +28,10 @@ describe("kimi footer status", () => {
 
     await host.emit("session_start", { reason: "startup" }, ctx);
 
-    assert.deepEqual(statusCalls, [{ id: "pi-quota", text: FOOTER }]);
+    assert.deepEqual(statusCalls, [
+      { id: "pi-quota", text: undefined },
+      { id: "pi-quota", text: FOOTER },
+    ]);
     assert.equal(deps.calls.length, 1);
     assert.equal(deps.calls[0].url, "https://api.kimi.com/coding/v1/usages");
   });
@@ -47,7 +50,10 @@ describe("kimi footer status", () => {
 
     await host.emit("session_start", { reason: "startup" }, ctx);
 
-    assert.deepEqual(statusCalls, [{ id: "pi-quota", text: "◷ 5h 60% ↻3h12m" }]);
+    assert.deepEqual(statusCalls, [
+      { id: "pi-quota", text: undefined },
+      { id: "pi-quota", text: "◷ 5h 60% ↻3h12m" },
+    ]);
   });
 
   it("renders nothing for a malformed Kimi response", async () => {
@@ -134,6 +140,7 @@ describe("kimi footer status", () => {
     );
 
     assert.deepEqual(statusCalls, [
+      { id: "pi-quota", text: undefined },
       { id: "pi-quota", text: undefined },
       { id: "pi-quota", text: FOOTER },
     ]);

@@ -53,6 +53,14 @@ describe("quota footer rendering", () => {
     assert.equal(renderQuotaStatus(snapshot, { nowSeconds: NOW }), undefined);
   });
 
+  it("marks preserved last renderable snapshots as stale without changing their quota values", () => {
+    const rendered = renderQuotaStatus(TWO_WINDOWS, { nowSeconds: NOW, stale: true });
+
+    assert.ok(rendered);
+    assert.equal(rendered.text, "5h 58% ↻12m · 7d 95% ↻5d0h");
+    assert.equal(rendered.tone, "stale");
+  });
+
   it("renders degraded snapshots as a muted telemetry indicator", () => {
     const snapshot: QuotaSnapshot = {
       status: "degraded",

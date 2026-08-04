@@ -16,13 +16,15 @@ export const RESET_GLYPH = "↻";
 export interface RenderedQuotaStatus {
   readonly glyph: string;
   readonly text: string;
-  readonly tone: "normal" | "muted";
+  readonly tone: "normal" | "muted" | "stale";
 }
 
 export interface RenderOptions {
   readonly nowSeconds: number;
   /** Available footer width in columns; undefined means unbounded. */
   readonly width?: number;
+  /** Last renderable snapshot is being preserved after a failed refresh. */
+  readonly stale?: boolean;
 }
 
 function windowText(quotaWindow: QuotaWindow, nowSeconds: number, withReset: boolean): string {
@@ -38,7 +40,11 @@ export function renderQuotaStatus(
   if (snapshot.status === "unavailable") return undefined;
 
   if (snapshot.status === "degraded") {
-    return { glyph: QUOTA_GLYPH, text: "telemetry", tone: "muted" };
+    return {
+      glyph: QUOTA_GLYPH,
+      text: "telemetry",
+      tone: options.stale ? "stale" : "muted",
+    };
   }
 
   const windows = orderQuotaWindows(snapshot.windows).slice(0, 2);
@@ -54,5 +60,5 @@ export function renderQuotaStatus(
   const fits = (text: string) =>
     options.width === undefined || QUOTA_GLYPH.length + 1 + text.length <= options.width;
   const text = candidates.find(fits) ?? candidates[candidates.length - 1];
-  return { glyph: QUOTA_GLYPH, text, tone: "normal" };
+  return { glyph: QUOTA_GLYPH, text, tone: options.stale ? "stale" : "normal" };
 }

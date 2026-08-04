@@ -37,6 +37,26 @@ export interface KimiAdapterDeps {
   signal?: AbortSignal;
 }
 
+function kimiQuotaSource(fetchedAtSeconds: number): QuotaSourceMeta {
+  return {
+    kind: "experimental",
+    detailUrl: DETAIL_URL,
+    fetchedAtSeconds,
+  };
+}
+
+export function unavailableKimiQuotaSnapshot(
+  reason: UnavailableReason,
+  fetchedAtSeconds: number,
+): QuotaSnapshot {
+  return {
+    status: "unavailable",
+    provider: KIMI_PROVIDER,
+    reason,
+    source: kimiQuotaSource(fetchedAtSeconds),
+  };
+}
+
 function nonnegativeDecimal(value: unknown): bigint | undefined {
   if (typeof value !== "string" || !/^\d+$/u.test(value)) return undefined;
   try {
@@ -121,17 +141,9 @@ function authorizationHeader(auth: KimiResolvedAuth): string | undefined {
 
 export async function fetchKimiQuotaSnapshot(deps: KimiAdapterDeps): Promise<QuotaSnapshot> {
   const nowSeconds = deps.nowSeconds();
-  const source: QuotaSourceMeta = {
-    kind: "experimental",
-    detailUrl: DETAIL_URL,
-    fetchedAtSeconds: nowSeconds,
-  };
-  const unavailable = (reason: UnavailableReason): QuotaSnapshot => ({
-    status: "unavailable",
-    provider: KIMI_PROVIDER,
-    reason,
-    source,
-  });
+  const source = kimiQuotaSource(nowSeconds);
+  const unavailable = (reason: UnavailableReason) =>
+    unavailableKimiQuotaSnapshot(reason, nowSeconds);
 
   let auth: KimiResolvedAuth | undefined;
   try {

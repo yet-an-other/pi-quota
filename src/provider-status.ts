@@ -1,19 +1,28 @@
 /**
- * Provider status core: decides what the footer shows for the active provider.
- *
- * Supported providers render their quota snapshot through the icon-only
- * footer status. Unsupported or absent providers render nothing. Non-TUI
- * modes degrade silently without footer side effects.
+ * Provider status core: routes supported providers to their adapters and
+ * renders lifecycle-owned quota state. Scheduling and state live in the quota
+ * lifecycle module; provider-specific endpoint behavior stays in adapters.
  */
 
-import { CODEX_PROVIDER, fetchCodexQuotaSnapshot } from "./providers/codex.ts";
-import { fetchKimiQuotaSnapshot, KIMI_PROVIDER } from "./providers/kimi.ts";
-import { fetchZaiQuotaSnapshot, ZAI_PROVIDER } from "./providers/zai.ts";
+import {
+  CODEX_PROVIDER,
+  fetchCodexQuotaSnapshot,
+  unavailableCodexQuotaSnapshot,
+} from "./providers/codex.ts";
+import {
+  fetchKimiQuotaSnapshot,
+  KIMI_PROVIDER,
+  unavailableKimiQuotaSnapshot,
+} from "./providers/kimi.ts";
+import {
+  fetchZaiQuotaSnapshot,
+  unavailableZaiQuotaSnapshot,
+  ZAI_PROVIDER,
+} from "./providers/zai.ts";
+import type { QuotaSnapshot, UnavailableReason } from "./quota-contract.ts";
 import { renderQuotaStatus } from "./quota-render.ts";
 
 export const PROVIDER_STATUS_ID = "pi-quota";
-
-const DEFAULT_TIMEOUT_MS = 8000;
 
 /** Minimal resolved-auth shape needed from Pi's provider auth registry. */
 export interface ResolvedProviderAuth {
@@ -40,28 +49,35 @@ export interface ProviderStatusHost {
 export interface ProviderStatusDeps {
   readonly fetchFn: typeof fetch;
   nowSeconds(): number;
-  /** Provider quota request deadline owned by the core. */
-  readonly timeoutMs?: number;
   /** Available footer width in columns; undefined means unbounded. */
   readonly width?: number;
 }
 
-export async function refreshProviderStatus(
+export function isSupportedProvider(provider: string | undefined): provider is string {
+  return provider === CODEX_PROVIDER || provider === KIMI_PROVIDER || provider === ZAI_PROVIDER;
+}
+
+export function unavailableProviderQuotaSnapshot(
+  provider: string,
+  reason: UnavailableReason,
+  fetchedAtSeconds: number,
+): QuotaSnapshot | undefined {
+  return provider === CODEX_PROVIDER
+    ? unavailableCodexQuotaSnapshot(reason, fetchedAtSeconds)
+    : provider === KIMI_PROVIDER
+      ? unavailableKimiQuotaSnapshot(reason, fetchedAtSeconds)
+      : provider === ZAI_PROVIDER
+        ? unavailableZaiQuotaSnapshot(reason, fetchedAtSeconds)
+        : undefined;
+}
+
+export async function fetchProviderQuotaSnapshot(
   host: ProviderStatusHost,
   deps: ProviderStatusDeps,
-): Promise<void> {
-  if (host.mode !== "tui") return;
-
+  signal: AbortSignal,
+): Promise<QuotaSnapshot | undefined> {
   const provider = host.provider;
-  if (provider === undefined) {
-    host.ui.setStatus(PROVIDER_STATUS_ID, undefined);
-    return;
-  }
-
-  if (provider !== CODEX_PROVIDER && provider !== KIMI_PROVIDER && provider !== ZAI_PROVIDER) {
-    host.ui.setStatus(PROVIDER_STATUS_ID, undefined);
-    return;
-  }
+  if (!isSupportedProvider(provider)) return undefined;
 
   const resolveAuth = async () => {
     const auth = await host.resolveAuth(provider);
@@ -73,24 +89,41 @@ export async function refreshProviderStatus(
     resolveAuth,
     fetchFn: deps.fetchFn,
     nowSeconds: deps.nowSeconds,
-    signal: AbortSignal.timeout(deps.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+    signal,
   };
-  const snapshot =
-    provider === CODEX_PROVIDER
-      ? await fetchCodexQuotaSnapshot(adapterDeps)
-      : provider === KIMI_PROVIDER
-        ? await fetchKimiQuotaSnapshot(adapterDeps)
-        : await fetchZaiQuotaSnapshot({ ...adapterDeps, providerBaseUrl: host.providerBaseUrl });
+
+  return provider === CODEX_PROVIDER
+    ? fetchCodexQuotaSnapshot(adapterDeps)
+    : provider === KIMI_PROVIDER
+      ? fetchKimiQuotaSnapshot(adapterDeps)
+      : fetchZaiQuotaSnapshot({ ...adapterDeps, providerBaseUrl: host.providerBaseUrl });
+}
+
+export function clearProviderStatus(host: ProviderStatusHost): void {
+  if (host.mode === "tui") host.ui.setStatus(PROVIDER_STATUS_ID, undefined);
+}
+
+export function renderProviderStatus(
+  host: ProviderStatusHost,
+  snapshot: QuotaSnapshot,
+  deps: Pick<ProviderStatusDeps, "nowSeconds" | "width">,
+  stale: boolean,
+): void {
+  if (host.mode !== "tui") return;
+
   const rendered = renderQuotaStatus(snapshot, {
     nowSeconds: deps.nowSeconds(),
     width: deps.width,
+    stale,
   });
-
   if (rendered === undefined) {
-    host.ui.setStatus(PROVIDER_STATUS_ID, undefined);
+    clearProviderStatus(host);
     return;
   }
 
-  const glyph = host.theme.fg(rendered.tone === "muted" ? "muted" : "accent", rendered.glyph);
-  host.ui.setStatus(PROVIDER_STATUS_ID, `${glyph} ${host.theme.fg("dim", rendered.text)}`);
+  const glyphColor =
+    rendered.tone === "stale" ? "warning" : rendered.tone === "muted" ? "muted" : "accent";
+  const textColor = rendered.tone === "stale" ? "muted" : "dim";
+  const glyph = host.theme.fg(glyphColor, rendered.glyph);
+  host.ui.setStatus(PROVIDER_STATUS_ID, `${glyph} ${host.theme.fg(textColor, rendered.text)}`);
 }

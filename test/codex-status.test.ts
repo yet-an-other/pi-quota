@@ -20,7 +20,10 @@ describe("codex footer status", () => {
 
     await host.emit("session_start", { reason: "startup" }, ctx);
 
-    assert.deepEqual(statusCalls, [{ id: "pi-quota", text: "◷ 5h 58% ↻12m · 7d 95% ↻5d0h" }]);
+    assert.deepEqual(statusCalls, [
+      { id: "pi-quota", text: undefined },
+      { id: "pi-quota", text: "◷ 5h 58% ↻12m · 7d 95% ↻5d0h" },
+    ]);
     assert.equal(deps.calls.length, 1);
   });
 
@@ -36,7 +39,10 @@ describe("codex footer status", () => {
 
     await host.emit("session_start", { reason: "startup" }, ctx);
 
-    assert.deepEqual(statusCalls, [{ id: "pi-quota", text: "◷ 5h 58% ↻12m · 7d 95% ↻5d0h" }]);
+    assert.deepEqual(statusCalls, [
+      { id: "pi-quota", text: undefined },
+      { id: "pi-quota", text: "◷ 5h 58% ↻12m · 7d 95% ↻5d0h" },
+    ]);
     assert.equal(deps.calls.length, 1);
   });
 
@@ -72,7 +78,9 @@ describe("codex footer status", () => {
     );
 
     assert.deepEqual(statusCalls, [
+      { id: "pi-quota", text: undefined },
       { id: "pi-quota", text: "◷ 5h 58% ↻12m · 7d 95% ↻5d0h" },
+      { id: "pi-quota", text: undefined },
       { id: "pi-quota", text: undefined },
       { id: "pi-quota", text: "◷ 5h 58% ↻12m · 7d 95% ↻5d0h" },
     ]);

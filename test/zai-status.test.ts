@@ -24,7 +24,10 @@ describe("Z.AI footer status", () => {
 
     await host.emit("session_start", { reason: "startup" }, ctx);
 
-    assert.deepEqual(statusCalls, [{ id: "pi-quota", text: "◷ telemetry" }]);
+    assert.deepEqual(statusCalls, [
+      { id: "pi-quota", text: undefined },
+      { id: "pi-quota", text: "◷ telemetry" },
+    ]);
     assert.equal(deps.calls.length, 1);
   });
 

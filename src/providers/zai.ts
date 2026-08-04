@@ -37,6 +37,26 @@ export interface ZaiAdapterDeps {
   readonly signal?: AbortSignal;
 }
 
+function zaiQuotaSource(fetchedAtSeconds: number): QuotaSourceMeta {
+  return {
+    kind: "first-party-private",
+    detailUrl: DETAIL_URL,
+    fetchedAtSeconds,
+  };
+}
+
+export function unavailableZaiQuotaSnapshot(
+  reason: UnavailableReason,
+  fetchedAtSeconds: number,
+): QuotaSnapshot {
+  return {
+    status: "unavailable",
+    provider: ZAI_PROVIDER,
+    reason,
+    source: zaiQuotaSource(fetchedAtSeconds),
+  };
+}
+
 function validatedPercentage(value: unknown): number | undefined {
   const percentage = asFiniteNumber(value);
   return percentage !== undefined && percentage >= 0 && percentage <= 100
@@ -90,17 +110,9 @@ function originOf(value: string | undefined): string | undefined {
 }
 
 export async function fetchZaiQuotaSnapshot(deps: ZaiAdapterDeps): Promise<QuotaSnapshot> {
-  const source: QuotaSourceMeta = {
-    kind: "first-party-private",
-    detailUrl: DETAIL_URL,
-    fetchedAtSeconds: deps.nowSeconds(),
-  };
-  const unavailable = (reason: UnavailableReason): QuotaSnapshot => ({
-    status: "unavailable",
-    provider: ZAI_PROVIDER,
-    reason,
-    source,
-  });
+  const source = zaiQuotaSource(deps.nowSeconds());
+  const unavailable = (reason: UnavailableReason) =>
+    unavailableZaiQuotaSnapshot(reason, source.fetchedAtSeconds);
 
   if (originOf(deps.providerBaseUrl) !== ZAI_ORIGIN) return unavailable("unsupported");
 

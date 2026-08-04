@@ -43,6 +43,26 @@ export interface CodexAdapterDeps {
   signal?: AbortSignal;
 }
 
+function codexQuotaSource(fetchedAtSeconds: number): QuotaSourceMeta {
+  return {
+    kind: "first-party-private",
+    detailUrl: DETAIL_URL,
+    fetchedAtSeconds,
+  };
+}
+
+export function unavailableCodexQuotaSnapshot(
+  reason: UnavailableReason,
+  fetchedAtSeconds: number,
+): QuotaSnapshot {
+  return {
+    status: "unavailable",
+    provider: CODEX_PROVIDER,
+    reason,
+    source: codexQuotaSource(fetchedAtSeconds),
+  };
+}
+
 /** Derives the ChatGPT account identifier locally from the OAuth token. */
 export function deriveChatGptAccountId(token: string): string | undefined {
   const parts = token.split(".");
@@ -96,17 +116,9 @@ function parseWindow(
 
 export async function fetchCodexQuotaSnapshot(deps: CodexAdapterDeps): Promise<QuotaSnapshot> {
   const nowSeconds = deps.nowSeconds();
-  const source: QuotaSourceMeta = {
-    kind: "first-party-private",
-    detailUrl: DETAIL_URL,
-    fetchedAtSeconds: nowSeconds,
-  };
-  const unavailable = (reason: UnavailableReason): QuotaSnapshot => ({
-    status: "unavailable",
-    provider: CODEX_PROVIDER,
-    reason,
-    source,
-  });
+  const source = codexQuotaSource(nowSeconds);
+  const unavailable = (reason: UnavailableReason) =>
+    unavailableCodexQuotaSnapshot(reason, nowSeconds);
 
   let auth: CodexResolvedAuth | undefined;
   try {

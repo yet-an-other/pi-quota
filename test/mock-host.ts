@@ -10,6 +10,11 @@ export interface StatusCall {
   text: string | undefined;
 }
 
+export interface ThemeCall {
+  color: string;
+  text: string;
+}
+
 export interface MockContextOptions {
   mode?: string;
   provider?: string;
@@ -38,13 +43,28 @@ export function createExtensionHost() {
     async emit(event: string, eventPayload: unknown, ctx: unknown): Promise<void> {
       const handler = handlers.get(event);
       if (!handler) throw new Error(`No handler registered for ${event}`);
+      if (
+        event === "model_select" &&
+        typeof ctx === "object" &&
+        ctx !== null &&
+        typeof eventPayload === "object" &&
+        eventPayload !== null &&
+        "model" in eventPayload
+      ) {
+        (ctx as { model?: unknown }).model = eventPayload.model;
+      }
       await handler(eventPayload, ctx);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    },
+    async flush(): Promise<void> {
+      await new Promise<void>((resolve) => setImmediate(resolve));
     },
   };
 }
 
 export function createContext(options: MockContextOptions = {}) {
   const statusCalls: StatusCall[] = [];
+  const themeCalls: ThemeCall[] = [];
 
   const ctx = {
     mode: options.mode ?? "tui",
@@ -57,7 +77,8 @@ export function createContext(options: MockContextOptions = {}) {
           },
     ui: {
       theme: {
-        fg(_color: string, text: string) {
+        fg(color: string, text: string) {
+          themeCalls.push({ color, text });
           return text;
         },
       },
@@ -72,5 +93,5 @@ export function createContext(options: MockContextOptions = {}) {
     },
   };
 
-  return { ctx, statusCalls };
+  return { ctx, statusCalls, themeCalls };
 }
