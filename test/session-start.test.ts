@@ -7,11 +7,11 @@ describe("session start", () => {
   it("shows the active provider name in the footer status", async () => {
     const host = createExtensionHost();
     registerExtension(host.api);
-    const { ctx, statusCalls } = createContext({ provider: "openai-codex" });
+    const { ctx, statusCalls } = createContext({ provider: "anthropic" });
 
     await host.emit("session_start", { reason: "startup" }, ctx);
 
-    assert.deepEqual(statusCalls, [{ id: "pi-quota", text: "openai-codex" }]);
+    assert.deepEqual(statusCalls, [{ id: "pi-quota", text: "anthropic" }]);
   });
 
   it("clears the provider status when no active provider exists", async () => {

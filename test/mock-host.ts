@@ -13,6 +13,7 @@ export interface StatusCall {
 export interface MockContextOptions {
   mode?: string;
   provider?: string;
+  auth?: { apiKey?: string; baseUrl?: string };
 }
 
 export function createExtensionHost() {
@@ -44,8 +45,18 @@ export function createContext(options: MockContextOptions = {}) {
     mode: options.mode ?? "tui",
     model: options.provider === undefined ? undefined : { provider: options.provider },
     ui: {
+      theme: {
+        fg(_color: string, text: string) {
+          return text;
+        },
+      },
       setStatus(id: string, text: string | undefined) {
         statusCalls.push({ id, text });
+      },
+    },
+    modelRegistry: {
+      async getProviderAuth(_provider: string) {
+        return options.auth === undefined ? undefined : { auth: options.auth };
       },
     },
   };

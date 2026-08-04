@@ -7,7 +7,13 @@ describe("non-TUI modes", () => {
   for (const mode of ["print", "json", "rpc"]) {
     it(`leaves the footer untouched in ${mode} mode`, async () => {
       const host = createExtensionHost();
-      registerExtension(host.api);
+      let fetches = 0;
+      registerExtension(host.api, {
+        fetchFn: (async () => {
+          fetches += 1;
+          throw new Error("fetch must not be called");
+        }) as unknown as typeof fetch,
+      });
       const { ctx, statusCalls } = createContext({ mode, provider: "openai-codex" });
 
       await host.emit("session_start", { reason: "startup" }, ctx);
@@ -18,6 +24,7 @@ describe("non-TUI modes", () => {
       );
 
       assert.deepEqual(statusCalls, []);
+      assert.equal(fetches, 0);
     });
   }
 });
