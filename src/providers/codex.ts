@@ -17,9 +17,11 @@ import {
   asFiniteNumber,
   clampRemainingPercent,
   isRecord,
+  type ProviderAdapterDeps,
   type QuotaSnapshot,
   type QuotaSourceMeta,
   type QuotaWindow,
+  type ResolvedProviderAuth,
   type UnavailableReason,
 } from "../quota-contract.ts";
 import { formatWindowDuration } from "../quota-time.ts";
@@ -29,19 +31,6 @@ export const CODEX_PROVIDER = "openai-codex";
 const CHATGPT_ORIGIN = "https://chatgpt.com";
 const USAGE_URL = `${CHATGPT_ORIGIN}/backend-api/wham/usage`;
 const DETAIL_URL = "https://chatgpt.com/codex/settings/usage";
-
-/** Minimal resolved-auth shape the adapter needs from Pi's auth registry. */
-export interface CodexResolvedAuth {
-  readonly apiKey?: string;
-  readonly baseUrl?: string;
-}
-
-export interface CodexAdapterDeps {
-  resolveAuth(): Promise<CodexResolvedAuth | undefined>;
-  fetchFn: typeof fetch;
-  nowSeconds(): number;
-  signal?: AbortSignal;
-}
 
 function codexQuotaSource(fetchedAtSeconds: number): QuotaSourceMeta {
   return {
@@ -114,13 +103,13 @@ function parseWindow(
   };
 }
 
-export async function fetchCodexQuotaSnapshot(deps: CodexAdapterDeps): Promise<QuotaSnapshot> {
+export async function fetchCodexQuotaSnapshot(deps: ProviderAdapterDeps): Promise<QuotaSnapshot> {
   const nowSeconds = deps.nowSeconds();
   const source = codexQuotaSource(nowSeconds);
   const unavailable = (reason: UnavailableReason) =>
     unavailableCodexQuotaSnapshot(reason, nowSeconds);
 
-  let auth: CodexResolvedAuth | undefined;
+  let auth: ResolvedProviderAuth | undefined;
   try {
     auth = await deps.resolveAuth();
   } catch {

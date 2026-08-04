@@ -10,9 +10,11 @@
 import {
   asFiniteNumber,
   isRecord,
+  type ProviderAdapterDeps,
   type QuotaSnapshot,
   type QuotaSourceMeta,
   type QuotaTelemetry,
+  type ResolvedProviderAuth,
   type UnavailableReason,
 } from "../quota-contract.ts";
 
@@ -21,21 +23,6 @@ export const ZAI_PROVIDER = "zai";
 const ZAI_ORIGIN = "https://api.z.ai";
 const USAGE_URL = `${ZAI_ORIGIN}/api/monitor/usage/quota/limit`;
 const DETAIL_URL = "https://z.ai/manage-apikey/subscription";
-
-export interface ZaiResolvedAuth {
-  readonly apiKey?: string;
-  readonly headers?: Readonly<Record<string, string | null>>;
-  readonly baseUrl?: string;
-}
-
-export interface ZaiAdapterDeps {
-  /** Active model URL, checked before resolving the provider credential. */
-  readonly providerBaseUrl: string | undefined;
-  resolveAuth(): Promise<ZaiResolvedAuth | undefined>;
-  readonly fetchFn: typeof fetch;
-  nowSeconds(): number;
-  readonly signal?: AbortSignal;
-}
 
 function zaiQuotaSource(fetchedAtSeconds: number): QuotaSourceMeta {
   return {
@@ -109,14 +96,14 @@ function originOf(value: string | undefined): string | undefined {
   }
 }
 
-export async function fetchZaiQuotaSnapshot(deps: ZaiAdapterDeps): Promise<QuotaSnapshot> {
+export async function fetchZaiQuotaSnapshot(deps: ProviderAdapterDeps): Promise<QuotaSnapshot> {
   const source = zaiQuotaSource(deps.nowSeconds());
   const unavailable = (reason: UnavailableReason) =>
     unavailableZaiQuotaSnapshot(reason, source.fetchedAtSeconds);
 
   if (originOf(deps.providerBaseUrl) !== ZAI_ORIGIN) return unavailable("unsupported");
 
-  let auth: ZaiResolvedAuth | undefined;
+  let auth: ResolvedProviderAuth | undefined;
   try {
     auth = await deps.resolveAuth();
   } catch {

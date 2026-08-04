@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { KimiAdapterDeps } from "../src/providers/kimi.ts";
+import type { ProviderAdapterDeps } from "../src/quota-contract.ts";
 
 export const NOW = 1_735_689_000;
 export const WEEKLY_RESET = new Date((NOW + 5 * 86400) * 1000).toISOString();
@@ -52,7 +52,7 @@ export function stubFetch(handler: (call: FetchCall) => Response | Promise<Respo
   return { fetchFn: fetchFn as typeof fetch, calls };
 }
 
-export function kimiDeps(overrides: Partial<KimiAdapterDeps> = {}): KimiAdapterDeps {
+export function kimiDeps(overrides: Partial<ProviderAdapterDeps> = {}): ProviderAdapterDeps {
   return {
     resolveAuth: async () => ({
       headers: { Authorization: "Bearer kimi-test-token" },

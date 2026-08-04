@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { CodexAdapterDeps } from "../src/providers/codex.ts";
+import type { ProviderAdapterDeps } from "../src/quota-contract.ts";
 
 export const NOW = 1_735_689_000;
 
@@ -35,7 +35,7 @@ export function stubFetch(handler: (call: FetchCall) => Response | Promise<Respo
   return { fetchFn: fetchFn as unknown as typeof fetch, calls };
 }
 
-export function codexDeps(overrides: Partial<CodexAdapterDeps> = {}): CodexAdapterDeps {
+export function codexDeps(overrides: Partial<ProviderAdapterDeps> = {}): ProviderAdapterDeps {
   return {
     resolveAuth: async () => ({
       apiKey: VALID_TOKEN,

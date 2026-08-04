@@ -21,15 +21,12 @@ import {
   unavailableZaiQuotaSnapshot,
   ZAI_PROVIDER,
 } from "./providers/zai.ts";
-import type { QuotaSnapshot, UnavailableReason } from "./quota-contract.ts";
+import type {
+  QuotaSnapshot,
+  ResolvedProviderAuth,
+  UnavailableReason,
+} from "./quota-contract.ts";
 import type { NowSeconds } from "./quota-time.ts";
-
-/** Minimal resolved-auth shape needed from Pi's provider auth registry. */
-export interface ResolvedProviderAuth {
-  readonly apiKey?: string;
-  readonly headers?: Readonly<Record<string, string | null>>;
-  readonly baseUrl?: string;
-}
 
 /** Narrow structural seam over the Pi host so tests can mock it. */
 export interface ProviderStatusHost {

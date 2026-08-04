@@ -7,6 +7,28 @@
  * and missing values remain unknown — never zero.
  */
 
+import type { NowSeconds } from "./quota-time.ts";
+
+/** Minimal resolved-auth shape adapters need from Pi's provider auth registry. */
+export interface ResolvedProviderAuth {
+  readonly apiKey?: string;
+  readonly headers?: Readonly<Record<string, string | null>>;
+  readonly baseUrl?: string;
+}
+
+/**
+ * Dependencies every provider adapter receives from the dispatch path.
+ * Adapters ignore the fields they do not need.
+ */
+export interface ProviderAdapterDeps {
+  /** Effective base URL of the active model, supplied by Pi. */
+  readonly providerBaseUrl?: string | undefined;
+  resolveAuth(): Promise<ResolvedProviderAuth | undefined>;
+  readonly fetchFn: typeof fetch;
+  readonly nowSeconds: NowSeconds;
+  readonly signal?: AbortSignal;
+}
+
 /** Stability classification of a provider quota source. */
 export type QuotaSourceKind = "public" | "first-party-private" | "experimental";
 

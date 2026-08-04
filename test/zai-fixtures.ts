@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { ZaiAdapterDeps } from "../src/providers/zai.ts";
+import type { ProviderAdapterDeps } from "../src/quota-contract.ts";
 
 export const NOW = 1_735_689_000;
 export const ZAI_BASE_URL = "https://api.z.ai/api/coding/paas/v4";
@@ -47,7 +47,7 @@ export function stubFetch(handler: (call: FetchCall) => Response | Promise<Respo
   return { fetchFn: fetchFn as typeof fetch, calls };
 }
 
-export function zaiDeps(overrides: Partial<ZaiAdapterDeps> = {}): ZaiAdapterDeps {
+export function zaiDeps(overrides: Partial<ProviderAdapterDeps> = {}): ProviderAdapterDeps {
   return {
     providerBaseUrl: ZAI_BASE_URL,
     resolveAuth: async () => ({ apiKey: "zai-test-key" }),

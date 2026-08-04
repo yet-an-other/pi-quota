@@ -10,9 +10,11 @@
 import {
   asFiniteNumber,
   isRecord,
+  type ProviderAdapterDeps,
   type QuotaSnapshot,
   type QuotaSourceMeta,
   type QuotaWindow,
+  type ResolvedProviderAuth,
   type UnavailableReason,
 } from "../quota-contract.ts";
 import { formatWindowDuration } from "../quota-time.ts";
@@ -23,19 +25,6 @@ const KIMI_ORIGIN = "https://api.kimi.com";
 const USAGE_URL = `${KIMI_ORIGIN}/coding/v1/usages`;
 const DETAIL_URL = "https://www.kimi.com/code";
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
-
-export interface KimiResolvedAuth {
-  readonly apiKey?: string;
-  readonly headers?: Readonly<Record<string, string | null>>;
-  readonly baseUrl?: string;
-}
-
-export interface KimiAdapterDeps {
-  resolveAuth(): Promise<KimiResolvedAuth | undefined>;
-  fetchFn: typeof fetch;
-  nowSeconds(): number;
-  signal?: AbortSignal;
-}
 
 function kimiQuotaSource(fetchedAtSeconds: number): QuotaSourceMeta {
   return {
@@ -130,7 +119,7 @@ function durationSeconds(value: unknown): number | undefined {
   return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : undefined;
 }
 
-function authorizationHeader(auth: KimiResolvedAuth): string | undefined {
+function authorizationHeader(auth: ResolvedProviderAuth): string | undefined {
   for (const [name, value] of Object.entries(auth.headers ?? {})) {
     if (name.toLowerCase() === "authorization" && typeof value === "string" && value.trim()) {
       return value;
@@ -139,13 +128,13 @@ function authorizationHeader(auth: KimiResolvedAuth): string | undefined {
   return auth.apiKey ? `Bearer ${auth.apiKey}` : undefined;
 }
 
-export async function fetchKimiQuotaSnapshot(deps: KimiAdapterDeps): Promise<QuotaSnapshot> {
+export async function fetchKimiQuotaSnapshot(deps: ProviderAdapterDeps): Promise<QuotaSnapshot> {
   const nowSeconds = deps.nowSeconds();
   const source = kimiQuotaSource(nowSeconds);
   const unavailable = (reason: UnavailableReason) =>
     unavailableKimiQuotaSnapshot(reason, nowSeconds);
 
-  let auth: KimiResolvedAuth | undefined;
+  let auth: ResolvedProviderAuth | undefined;
   try {
     auth = await deps.resolveAuth();
   } catch {
