@@ -24,6 +24,10 @@ _Avoid_: Quota response, provider payload
 The provider-specific boundary that resolves Pi authentication, fetches provider data, validates it, and returns a quota snapshot.
 _Avoid_: Provider client, quota fetcher
 
+**Provider registry**:
+The canonical, ordered set of provider integrations pi-quota supports. Every enumeration of providers — the supported check, provider routing, and the details view — derives from it, so a provider is supported exactly when it appears in the registry.
+_Avoid_: Supported-providers list, provider list
+
 **Quota state**:
 The extension’s current provider-specific freshness state, combining the latest quota snapshot, the last renderable quota snapshot, stale status, and refresh failure metadata.
 _Avoid_: Quota cache, cached quota
