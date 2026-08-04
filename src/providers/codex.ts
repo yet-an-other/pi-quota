@@ -29,7 +29,6 @@ export const CODEX_PROVIDER = "openai-codex";
 const CHATGPT_ORIGIN = "https://chatgpt.com";
 const USAGE_URL = `${CHATGPT_ORIGIN}/backend-api/wham/usage`;
 const DETAIL_URL = "https://chatgpt.com/codex/settings/usage";
-const DEFAULT_TIMEOUT_MS = 8000;
 
 /** Minimal resolved-auth shape the adapter needs from Pi's auth registry. */
 export interface CodexResolvedAuth {
@@ -41,7 +40,7 @@ export interface CodexAdapterDeps {
   resolveAuth(): Promise<CodexResolvedAuth | undefined>;
   fetchFn: typeof fetch;
   nowSeconds(): number;
-  timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 /** Derives the ChatGPT account identifier locally from the OAuth token. */
@@ -136,7 +135,7 @@ export async function fetchCodexQuotaSnapshot(deps: CodexAdapterDeps): Promise<Q
         Authorization: `Bearer ${auth.apiKey}`,
         "ChatGPT-Account-ID": accountId,
       },
-      signal: AbortSignal.timeout(deps.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      signal: deps.signal,
     });
   } catch {
     return unavailable("transient");

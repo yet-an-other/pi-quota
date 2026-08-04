@@ -14,7 +14,11 @@ export interface MockContextOptions {
   mode?: string;
   provider?: string;
   modelBaseUrl?: string;
-  auth?: { apiKey?: string; baseUrl?: string };
+  auth?: {
+    apiKey?: string;
+    headers?: Record<string, string | null>;
+    baseUrl?: string;
+  };
 }
 
 export function createExtensionHost() {

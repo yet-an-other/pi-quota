@@ -13,7 +13,7 @@ describe("model change", () => {
     await host.emit(
       "model_select",
       {
-        model: { provider: "kimi-coding", id: "kimi-for-coding" },
+        model: { provider: "google", id: "gemini-2.5-pro", baseUrl: "https://generativelanguage.googleapis.com" },
         previousModel: { provider: "anthropic", id: "claude-opus-4-5" },
         source: "set",
       },
@@ -22,7 +22,7 @@ describe("model change", () => {
 
     assert.deepEqual(statusCalls, [
       { id: "pi-quota", text: "anthropic" },
-      { id: "pi-quota", text: "kimi-coding" },
+      { id: "pi-quota", text: "google" },
     ]);
   });
 });
