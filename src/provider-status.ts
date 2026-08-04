@@ -22,6 +22,8 @@ export interface ResolvedProviderAuth {
 export interface ProviderStatusHost {
   readonly mode: string;
   readonly provider: string | undefined;
+  /** Effective base URL of the active model, supplied by Pi. */
+  readonly providerBaseUrl: string | undefined;
   readonly ui: {
     setStatus(id: string, text: string | undefined): void;
   };
@@ -57,7 +59,12 @@ export async function refreshProviderStatus(
   }
 
   const snapshot = await fetchCodexQuotaSnapshot({
-    resolveAuth: () => host.resolveAuth(provider),
+    resolveAuth: async () => {
+      const auth = await host.resolveAuth(provider);
+      return auth === undefined
+        ? undefined
+        : { ...auth, baseUrl: auth.baseUrl ?? host.providerBaseUrl };
+    },
     fetchFn: deps.fetchFn,
     nowSeconds: deps.nowSeconds,
   });

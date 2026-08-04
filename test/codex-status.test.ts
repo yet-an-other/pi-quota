@@ -24,6 +24,22 @@ describe("codex footer status", () => {
     assert.equal(deps.calls.length, 1);
   });
 
+  it("uses the active model origin when resolved OAuth auth has no base URL", async () => {
+    const host = createExtensionHost();
+    const deps = codexDeps();
+    registerExtension(host.api, deps);
+    const { ctx, statusCalls } = createContext({
+      provider: "openai-codex",
+      modelBaseUrl: "https://chatgpt.com/backend-api",
+      auth: { apiKey: VALID_TOKEN },
+    });
+
+    await host.emit("session_start", { reason: "startup" }, ctx);
+
+    assert.deepEqual(statusCalls, [{ id: "pi-quota", text: "◷ 5h 58% ↻12m · 7d 95% ↻5d0h" }]);
+    assert.equal(deps.calls.length, 1);
+  });
+
   it("renders nothing when codex quota is unavailable", async () => {
     const host = createExtensionHost();
     const deps = codexDeps();

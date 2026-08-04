@@ -12,7 +12,10 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
     nowSeconds: deps.nowSeconds ?? (() => Math.floor(Date.now() / 1000)),
   };
 
-  const refresh = async (ctx: ExtensionContext, provider: string | undefined): Promise<void> => {
+  const refresh = async (
+    ctx: ExtensionContext,
+    model: { readonly provider: string; readonly baseUrl: string } | undefined,
+  ): Promise<void> => {
     const statusDeps: ProviderStatusDeps = {
       ...resolvedDeps,
       width: process.stdout.columns,
@@ -21,7 +24,8 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
       await refreshProviderStatus(
         {
           mode: ctx.mode,
-          provider,
+          provider: model?.provider,
+          providerBaseUrl: model?.baseUrl,
           ui: ctx.ui,
           theme: ctx.ui.theme,
           resolveAuth: async (id) => (await ctx.modelRegistry.getProviderAuth(id))?.auth,
@@ -36,6 +40,6 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
     }
   };
 
-  pi.on("session_start", (_event, ctx) => refresh(ctx, ctx.model?.provider));
-  pi.on("model_select", (event, ctx) => refresh(ctx, event.model?.provider));
+  pi.on("session_start", (_event, ctx) => refresh(ctx, ctx.model));
+  pi.on("model_select", (event, ctx) => refresh(ctx, event.model));
 }

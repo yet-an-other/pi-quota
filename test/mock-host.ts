@@ -13,6 +13,7 @@ export interface StatusCall {
 export interface MockContextOptions {
   mode?: string;
   provider?: string;
+  modelBaseUrl?: string;
   auth?: { apiKey?: string; baseUrl?: string };
 }
 
@@ -43,7 +44,13 @@ export function createContext(options: MockContextOptions = {}) {
 
   const ctx = {
     mode: options.mode ?? "tui",
-    model: options.provider === undefined ? undefined : { provider: options.provider },
+    model:
+      options.provider === undefined
+        ? undefined
+        : {
+            provider: options.provider,
+            ...(options.modelBaseUrl === undefined ? {} : { baseUrl: options.modelBaseUrl }),
+          },
     ui: {
       theme: {
         fg(_color: string, text: string) {
