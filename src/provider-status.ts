@@ -2,13 +2,13 @@
  * Provider status core: decides what the footer shows for the active provider.
  *
  * Supported providers render their quota snapshot through the icon-only
- * footer status; unsupported providers show the temporary provider-name
- * placeholder that later quota slices replace; absent providers render
- * nothing. Non-TUI modes degrade silently without footer side effects.
+ * footer status. Unsupported or absent providers render nothing. Non-TUI
+ * modes degrade silently without footer side effects.
  */
 
 import { CODEX_PROVIDER, fetchCodexQuotaSnapshot } from "./providers/codex.ts";
 import { fetchKimiQuotaSnapshot, KIMI_PROVIDER } from "./providers/kimi.ts";
+import { fetchZaiQuotaSnapshot, ZAI_PROVIDER } from "./providers/zai.ts";
 import { renderQuotaStatus } from "./quota-render.ts";
 
 export const PROVIDER_STATUS_ID = "pi-quota";
@@ -58,9 +58,8 @@ export async function refreshProviderStatus(
     return;
   }
 
-  if (provider !== CODEX_PROVIDER && provider !== KIMI_PROVIDER) {
-    // Temporary placeholder until the provider's quota slice lands.
-    host.ui.setStatus(PROVIDER_STATUS_ID, provider);
+  if (provider !== CODEX_PROVIDER && provider !== KIMI_PROVIDER && provider !== ZAI_PROVIDER) {
+    host.ui.setStatus(PROVIDER_STATUS_ID, undefined);
     return;
   }
 
@@ -79,7 +78,9 @@ export async function refreshProviderStatus(
   const snapshot =
     provider === CODEX_PROVIDER
       ? await fetchCodexQuotaSnapshot(adapterDeps)
-      : await fetchKimiQuotaSnapshot(adapterDeps);
+      : provider === KIMI_PROVIDER
+        ? await fetchKimiQuotaSnapshot(adapterDeps)
+        : await fetchZaiQuotaSnapshot({ ...adapterDeps, providerBaseUrl: host.providerBaseUrl });
   const rendered = renderQuotaStatus(snapshot, {
     nowSeconds: deps.nowSeconds(),
     width: deps.width,

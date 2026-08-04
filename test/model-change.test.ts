@@ -4,7 +4,7 @@ import registerExtension from "../src/index.ts";
 import { createExtensionHost, createContext } from "./mock-host.ts";
 
 describe("model change", () => {
-  it("updates the footer status to the newly selected provider", async () => {
+  it("keeps quota status hidden across unsupported providers", async () => {
     const host = createExtensionHost();
     registerExtension(host.api);
     const { ctx, statusCalls } = createContext({ provider: "anthropic" });
@@ -21,8 +21,8 @@ describe("model change", () => {
     );
 
     assert.deepEqual(statusCalls, [
-      { id: "pi-quota", text: "anthropic" },
-      { id: "pi-quota", text: "google" },
+      { id: "pi-quota", text: undefined },
+      { id: "pi-quota", text: undefined },
     ]);
   });
 });

@@ -134,7 +134,7 @@ describe("kimi footer status", () => {
     );
 
     assert.deepEqual(statusCalls, [
-      { id: "pi-quota", text: "anthropic" },
+      { id: "pi-quota", text: undefined },
       { id: "pi-quota", text: FOOTER },
     ]);
     assert.equal(deps.calls.length, 1);
