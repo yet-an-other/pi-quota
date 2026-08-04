@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { QuotaSnapshot } from "../src/quota-contract.ts";
 import { QUOTA_GLYPH, renderQuotaDetails, renderQuotaStatus } from "../src/quota-render.ts";
+import { formatTimestamp } from "../src/quota-time.ts";
 import type { QuotaState } from "../src/quota-lifecycle.ts";
 
 const NOW = 1_735_689_000;
@@ -112,8 +113,8 @@ describe("quota detail rendering", () => {
 
     assert.match(rendered, /Source: first-party private/u);
     assert.match(rendered, /Last update: 30s ago/u);
-    assert.match(rendered, /5h: 58% remaining · resets 2025-01-01T00:02:00\.000Z \(in 12m\)/u);
-    assert.match(rendered, /7d: 95% remaining · resets 2025-01-05T23:50:00\.000Z \(in 5d0h\)/u);
+    assert.match(rendered, new RegExp(`5h: 58% remaining · resets ${formatTimestamp(NOW + 720)!} \\(in 12m\\)`, "u"));
+    assert.match(rendered, new RegExp(`7d: 95% remaining · resets ${formatTimestamp(NOW + 432000)!} \\(in 5d0h\\)`, "u"));
     assert.ok(rendered.indexOf("5h: 58%") < rendered.indexOf("7d: 95%"));
   });
 

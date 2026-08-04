@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatResetCountdown, formatWindowDuration } from "../src/quota-time.ts";
+import { formatResetCountdown, formatTimestamp, formatWindowDuration } from "../src/quota-time.ts";
 
 describe("reset countdown formatting", () => {
   it("shows minutes for resets under one hour, rounding up to the next minute", () => {
@@ -23,6 +23,24 @@ describe("reset countdown formatting", () => {
   it("shows an expired reset as resetting now", () => {
     assert.equal(formatResetCountdown(1000, 1000), "now");
     assert.equal(formatResetCountdown(999, 1000), "now");
+  });
+});
+
+describe("timestamp formatting", () => {
+  it("formats as dd-MM-YYYY HH:mm in the local time zone", () => {
+    const timestampSeconds = 1_735_689_000;
+    const local = new Date(timestampSeconds * 1000);
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const expected =
+      `${pad(local.getDate())}-${pad(local.getMonth() + 1)}-${local.getFullYear()}` +
+      ` ${pad(local.getHours())}:${pad(local.getMinutes())}`;
+    const formatted = formatTimestamp(timestampSeconds);
+    assert.match(formatted!, /^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/u);
+    assert.equal(formatted, expected);
+  });
+
+  it("returns undefined for timestamps outside the representable date range", () => {
+    assert.equal(formatTimestamp(Number.POSITIVE_INFINITY), undefined);
   });
 });
 

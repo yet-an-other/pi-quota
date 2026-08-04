@@ -20,10 +20,22 @@ export function formatAge(ageSeconds: number): string {
   return `${Math.floor(hours / 24)}d${hours % 24}h`;
 }
 
-/** Formats a Unix timestamp when it fits JavaScript's ISO date range. */
+/** Pads a number to two digits. */
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+/**
+ * Formats a Unix timestamp as "dd-MM-YYYY HH:mm" in the local time zone,
+ * when it fits JavaScript's date range.
+ */
 export function formatTimestamp(timestampSeconds: number): string | undefined {
   const date = new Date(timestampSeconds * 1000);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+  if (!Number.isFinite(date.getTime())) return undefined;
+  return (
+    `${pad2(date.getDate())}-${pad2(date.getMonth() + 1)}-${date.getFullYear()}` +
+    ` ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  );
 }
 
 /** Formats a window duration compactly, e.g. 300 → "5m", 18000 → "5h", 604800 → "7d". */
