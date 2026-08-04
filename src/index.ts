@@ -11,6 +11,7 @@ import {
   type QuotaLifecycleHost,
   type ScheduleTimeout,
 } from "./quota-lifecycle.ts";
+import { isSupportedProvider } from "./provider-status.ts";
 import { renderQuotaDetails } from "./quota-render.ts";
 import { SUPPORTED_PROVIDERS } from "./supported-providers.ts";
 
@@ -84,6 +85,7 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
 
       const action = args.trim();
       if (action === "refresh") {
+        if (!isSupportedProvider(ctx.model?.provider)) return;
         const state = await lifecycle.manualRefresh(activeHostFor(ctx), ctx.signal);
         const refreshed =
           state?.current?.status === "available" || state?.current?.status === "degraded";

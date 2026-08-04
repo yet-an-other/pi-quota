@@ -26,6 +26,25 @@ function responseFor(url: string): Response {
   });
 }
 
+async function captureConsole(run: () => Promise<void>): Promise<unknown[][]> {
+  const calls: unknown[][] = [];
+  const methods = ["debug", "error", "info", "log", "warn"] as const;
+  const originals = Object.fromEntries(methods.map((method) => [method, console[method]])) as
+    Record<(typeof methods)[number], typeof console.log>;
+
+  for (const method of methods) {
+    console[method] = (...args: unknown[]) => {
+      calls.push(args);
+    };
+  }
+  try {
+    await run();
+  } finally {
+    for (const method of methods) console[method] = originals[method];
+  }
+  return calls;
+}
+
 describe("quota detail command", () => {
   it("shows all providers, marks the active provider, lazily fetches missing data, and reuses it", async () => {
     const urls: string[] = [];
@@ -36,7 +55,7 @@ describe("quota detail command", () => {
     }) as typeof fetch;
     const host = createExtensionHost();
     registerExtension(host.api, { fetchFn, nowSeconds: () => NOW });
-    const { ctx, statusCalls, customViews } = createContext({
+    const { ctx, statusCalls, themeCalls, notifications, customViews } = createContext({
       provider: "openai-codex",
       modelBaseUrl: "https://chatgpt.com/backend-api",
       providerBaseUrls: {
@@ -51,25 +70,37 @@ describe("quota detail command", () => {
       },
     });
 
-    await host.emit("session_start", { reason: "startup" }, ctx);
-    const footerCallsAfterStartup = statusCalls.length;
-    await host.runCommand("quota", "", ctx);
+    const consoleCalls = await captureConsole(async () => {
+      await host.emit("session_start", { reason: "startup" }, ctx);
+      const footerCallsAfterStartup = statusCalls.length;
+      await host.runCommand("quota", "", ctx);
 
-    assert.equal(urls.length, 3);
-    assert.equal(statusCalls.length, footerCallsAfterStartup);
-    const details = customViews.at(-1)?.join("\n") ?? "";
-    assert.match(details, /OpenAI Codex \(active\)/u);
-    assert.match(details, /Kimi For Coding/u);
-    assert.match(details, /Z\.AI/u);
-    assert.match(details, /5h: 58% remaining/u);
-    assert.match(details, /Unknown semantics:/u);
+      assert.equal(urls.length, 3);
+      assert.equal(statusCalls.length, footerCallsAfterStartup);
+      const details = customViews.at(-1)?.join("\n") ?? "";
+      assert.match(details, /OpenAI Codex \(active\)/u);
+      assert.match(details, /Kimi For Coding/u);
+      assert.match(details, /Z\.AI/u);
+      assert.match(details, /5h: 58% remaining/u);
+      assert.match(details, /Unknown semantics:/u);
+
+      await host.runCommand("quota", "", ctx);
+      assert.equal(urls.length, 3);
+    });
+
+    const observableOutput = JSON.stringify({
+      consoleCalls,
+      statusCalls,
+      themeCalls,
+      notifications,
+      customViews,
+      persistedEntries: host.persistedEntries(),
+    });
     assert.doesNotMatch(
-      details,
+      observableOutput,
       new RegExp(`${VALID_TOKEN}|kimi-test-token|zai-test-key|acct-123|Authorization`, "iu"),
     );
-
-    await host.runCommand("quota", "", ctx);
-    assert.equal(urls.length, 3);
+    assert.deepEqual(host.persistedEntries(), []);
   });
 
   it("starts missing provider lookups in parallel", async () => {
@@ -191,7 +222,7 @@ describe("quota manual refresh command", () => {
     assert.deepEqual(notifications, [{ message: "Quota refreshed", type: "info" }]);
   });
 
-  it("reports failure without fetching when the active provider is unsupported", async () => {
+  it("degrades silently without fetching when the active provider is unsupported", async () => {
     let fetches = 0;
     const host = createExtensionHost();
     registerExtension(host.api, {
@@ -210,7 +241,7 @@ describe("quota manual refresh command", () => {
     await host.runCommand("quota", "refresh", ctx);
 
     assert.equal(fetches, 0);
-    assert.deepEqual(notifications, [{ message: "Quota refresh failed", type: "warning" }]);
+    assert.deepEqual(notifications, []);
   });
 
   it("reports a sanitized failure when the provider refresh is unavailable", async () => {

@@ -40,6 +40,7 @@ export interface MockContextOptions {
 export function createExtensionHost() {
   const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
   const commands = new Map<string, (args: string, ctx: unknown) => Promise<void>>();
+  const persistedEntries: Array<{ customType: string; data: unknown }> = [];
 
   const api = {
     on(event: string, handler: (event: unknown, ctx: unknown) => unknown) {
@@ -51,6 +52,9 @@ export function createExtensionHost() {
     ) {
       commands.set(name, options.handler);
     },
+    appendEntry(customType: string, data: unknown) {
+      persistedEntries.push({ customType, data });
+    },
   } as unknown as ExtensionAPI;
 
   return {
@@ -60,6 +64,9 @@ export function createExtensionHost() {
     },
     registeredCommands(): string[] {
       return [...commands.keys()];
+    },
+    persistedEntries(): ReadonlyArray<{ customType: string; data: unknown }> {
+      return [...persistedEntries];
     },
     async runCommand(name: string, args: string, ctx: unknown): Promise<void> {
       const handler = commands.get(name);
