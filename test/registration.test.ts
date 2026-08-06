@@ -15,6 +15,6 @@ describe("extension registration", () => {
       "session_shutdown",
       "session_start",
     ]);
-    assert.deepEqual(host.registeredCommands(), ["quota", "quota-style"]);
+    assert.deepEqual(host.registeredCommands(), ["quota"]);
   });
 });

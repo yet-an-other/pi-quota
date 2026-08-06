@@ -25,7 +25,7 @@ describe("quota footer rendering", () => {
     assert.ok(rendered);
     assert.equal(rendered.glyph, QUOTA_GLYPH);
     // 12 minutes and 5 days countdowns
-    assert.equal(rendered.text, "5h 58% ↻12m · 7d 95% ↻5d0h");
+    assert.equal(rendered.text, "5h: 58% ↻ 12m · 7d: 95% ↻ 5d0h");
     assert.equal(rendered.tone, "normal");
   });
 
@@ -38,7 +38,7 @@ describe("quota footer rendering", () => {
 
     const rendered = renderQuotaStatus(snapshot, { nowSeconds: NOW });
 
-    assert.equal(rendered?.text, "1h 10% · 5h 20%");
+    assert.equal(rendered?.text, "1h: 10% · 5h: 20%");
   });
 
   it("omits unknown resets and durations without failing", () => {
@@ -46,7 +46,7 @@ describe("quota footer rendering", () => {
 
     const rendered = renderQuotaStatus(snapshot, { nowSeconds: NOW });
 
-    assert.equal(rendered?.text, "window 80%");
+    assert.equal(rendered?.text, "window: 80%");
   });
 
   it("renders unavailable snapshots as nothing", () => {
@@ -59,7 +59,7 @@ describe("quota footer rendering", () => {
     const rendered = renderQuotaStatus(TWO_WINDOWS, { nowSeconds: NOW, stale: true });
 
     assert.ok(rendered);
-    assert.equal(rendered.text, "5h 58% ↻12m · 7d 95% ↻5d0h");
+    assert.equal(rendered.text, "5h: 58% ↻ 12m · 7d: 95% ↻ 5d0h");
     assert.equal(rendered.tone, "stale");
   });
 
@@ -208,22 +208,22 @@ describe("quota detail rendering", () => {
 });
 
 describe("quota footer width fallbacks", () => {
-  // Full text: "◷ 5h 58% ↻12m · 7d 95% ↻5d0h" = 29 columns
+  // Full text: "◷ 5h: 58% ↻ 12m · 7d: 95% ↻ 5d0h" = 32 columns
   it("omits reset segments before window data", () => {
     const rendered = renderQuotaStatus(TWO_WINDOWS, { nowSeconds: NOW, width: 20 });
 
-    assert.equal(rendered?.text, "5h 58% · 7d 95%");
+    assert.equal(rendered?.text, "5h: 58% · 7d: 95%");
   });
 
   it("omits secondary windows when resets alone are not enough", () => {
     const rendered = renderQuotaStatus(TWO_WINDOWS, { nowSeconds: NOW, width: 10 });
 
-    assert.equal(rendered?.text, "5h 58%");
+    assert.equal(rendered?.text, "5h: 58%");
   });
 
   it("keeps the full rendering when it fits", () => {
-    const rendered = renderQuotaStatus(TWO_WINDOWS, { nowSeconds: NOW, width: 30 });
+    const rendered = renderQuotaStatus(TWO_WINDOWS, { nowSeconds: NOW, width: 32 });
 
-    assert.equal(rendered?.text, "5h 58% ↻12m · 7d 95% ↻5d0h");
+    assert.equal(rendered?.text, "5h: 58% ↻ 12m · 7d: 95% ↻ 5d0h");
   });
 });

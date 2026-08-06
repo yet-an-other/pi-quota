@@ -46,26 +46,19 @@ export interface RenderOptions {
   readonly width?: number;
   /** Last renderable snapshot is being preserved after a failed refresh. */
   readonly stale?: boolean;
-  /**
-   * Footer layout: "compact" renders "5h 86% ↻3h52m", "spaced" renders
-   * "5h: 86% ↻ 3h52m". Defaults to "compact".
-   */
-  readonly layout?: "compact" | "spaced";
 }
 
 function windowSegments(
   quotaWindow: QuotaWindow,
   nowSeconds: number,
   withReset: boolean,
-  spaced: boolean,
 ): StatusSegment[] {
   let value = ` ${quotaWindow.remainingPercent}%`;
   if (withReset && quotaWindow.resetAtSeconds !== undefined) {
-    const countdown = formatResetCountdown(quotaWindow.resetAtSeconds, nowSeconds);
-    value += spaced ? ` ${RESET_GLYPH} ${countdown}` : ` ${RESET_GLYPH}${countdown}`;
+    value += ` ${RESET_GLYPH} ${formatResetCountdown(quotaWindow.resetAtSeconds, nowSeconds)}`;
   }
   return [
-    { role: "label", text: spaced ? `${quotaWindow.label}:` : quotaWindow.label },
+    { role: "label", text: `${quotaWindow.label}:` },
     { role: "value", text: value, remainingPercent: quotaWindow.remainingPercent },
   ];
 }
@@ -176,7 +169,6 @@ export function renderQuotaStatus(
 
   const windows = orderQuotaWindows(snapshot.windows).slice(0, 2);
   if (windows.length === 0) return undefined;
-  const spaced = options.layout === "spaced";
 
   const joinWindows = (withReset: boolean): StatusSegment[] =>
     windows.flatMap((quotaWindow, index) => [
@@ -191,14 +183,14 @@ export function renderQuotaStatus(
               quotaWindow.remainingPercent,
             ),
           }]),
-      ...windowSegments(quotaWindow, options.nowSeconds, withReset, spaced),
+      ...windowSegments(quotaWindow, options.nowSeconds, withReset),
     ]);
 
   // Width degradation: omit reset segments first, then secondary windows.
   const candidates = [
     joinWindows(true),
     joinWindows(false),
-    windowSegments(windows[0], options.nowSeconds, false, spaced),
+    windowSegments(windows[0], options.nowSeconds, false),
   ];
 
   const segmentText = (segments: readonly StatusSegment[]) =>

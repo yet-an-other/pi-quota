@@ -13,11 +13,6 @@ import {
 } from "./quota-lifecycle.ts";
 import { isSupportedProvider, PROVIDER_ADAPTERS } from "./provider-registry.ts";
 import { renderQuotaDetails } from "./quota-render.ts";
-import {
-  getQuotaStatusStyle,
-  QUOTA_STATUS_STYLES,
-  setQuotaStatusStyle,
-} from "./status-presenter.ts";
 
 export interface PiQuotaDeps {
   readonly fetchFn?: typeof fetch;
@@ -117,19 +112,6 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
         lifecycleDeps.nowSeconds(),
       );
       await showQuotaDetails(details, ctx);
-    },
-  });
-
-  pi.registerCommand("quota-style", {
-    description: "Cycle the quota footer color style",
-    handler: async (_args, ctx) => {
-      if (ctx.mode !== "tui") return;
-      const next = QUOTA_STATUS_STYLES[
-        (QUOTA_STATUS_STYLES.indexOf(getQuotaStatusStyle()) + 1) % QUOTA_STATUS_STYLES.length
-      ];
-      setQuotaStatusStyle(next);
-      lifecycle.rerenderStatus(activeHostFor(ctx));
-      ctx.ui.notify(`Quota status style: ${next}`, "info");
     },
   });
 

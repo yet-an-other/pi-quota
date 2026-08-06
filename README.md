@@ -38,8 +38,10 @@ Unsupported providers render no quota status and produce no notification. JSON, 
 The footer begins with `◷` and shows at most two validated quota windows, shortest first. For example:
 
 ```text
-◷ 5h 58% ↻12m · 7d 95% ↻5d0h
+◷ 5h: 58% ↻ 12m · 7d: 95% ↻ 5d0h
 ```
+
+The glyph, window labels, and `↻` use the theme success color. Each window's values are colored by remaining quota: error under 10%, warning under 20%, success otherwise.
 
 Narrow terminals drop reset countdowns and then the second window. Failed refreshes never display an invented zero. If the same provider has previously returned renderable data, the footer preserves it in stale colors; otherwise it stays empty.
 
