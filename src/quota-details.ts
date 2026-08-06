@@ -1,67 +1,21 @@
 /**
- * Quota footer rendering.
+ * Quota details view rendering.
  *
- * The footer segment is icon-only and begins with the quota glyph. At most
- * two validated quota windows are shown, ordered by ascending duration.
- * Unavailable quota renders nothing — never zero or invented quota.
- * Rendering contains no provider-specific endpoint logic.
+ * The /quota details view shows every provider in the provider registry with
+ * its quota state: validated quota windows with reset times, validated quota
+ * telemetry under unknown semantics, or a sanitized unavailable reason.
+ * Unavailable quota never renders zero or invented quota. Rendering contains
+ * no provider-specific endpoint logic.
  */
 
 import {
   orderQuotaWindows,
-  type QuotaSnapshot,
   type QuotaSourceKind,
-  type QuotaWindow,
   type UnavailableReason,
 } from "./quota-contract.ts";
 import { formatAge, formatResetCountdown, formatTimestamp } from "./quota-time.ts";
 import { PROVIDER_ADAPTERS } from "./provider-registry.ts";
 import type { QuotaState } from "./quota-lifecycle.ts";
-
-export const QUOTA_GLYPH = "◷";
-export const RESET_GLYPH = "↻";
-
-/**
- * Footer text segment: the quota window label or the remaining-quota body.
- * Segments let presenters color labels differently from values.
- */
-export type StatusSegmentRole = "label" | "value";
-export interface StatusSegment {
-  readonly role: StatusSegmentRole;
-  readonly text: string;
-  /** Remaining quota of the quota window this segment belongs to, when applicable. */
-  readonly remainingPercent?: number;
-}
-
-export interface RenderedQuotaStatus {
-  readonly glyph: string;
-  readonly text: string;
-  readonly segments: readonly StatusSegment[];
-  readonly tone: "normal" | "muted" | "stale";
-}
-
-export interface RenderOptions {
-  readonly nowSeconds: number;
-  /** Available footer width in columns; undefined means unbounded. */
-  readonly width?: number;
-  /** Last renderable snapshot is being preserved after a failed refresh. */
-  readonly stale?: boolean;
-}
-
-function windowSegments(
-  quotaWindow: QuotaWindow,
-  nowSeconds: number,
-  withReset: boolean,
-): StatusSegment[] {
-  let value = ` ${quotaWindow.remainingPercent}%`;
-  if (withReset && quotaWindow.resetAtSeconds !== undefined) {
-    value += ` ${RESET_GLYPH} ${formatResetCountdown(quotaWindow.resetAtSeconds, nowSeconds)}`;
-  }
-  return [
-    { role: "label", text: `${quotaWindow.label}:` },
-    { role: "value", text: value, remainingPercent: quotaWindow.remainingPercent },
-  ];
-}
 
 const SOURCE_LABELS: Readonly<Record<QuotaSourceKind, string>> = {
   public: "public",
@@ -150,59 +104,4 @@ export function renderQuotaDetails(
       "",
     ]),
   ].join("\n").trimEnd();
-}
-
-export function renderQuotaStatus(
-  snapshot: QuotaSnapshot,
-  options: RenderOptions,
-): RenderedQuotaStatus | undefined {
-  if (snapshot.status === "unavailable") return undefined;
-
-  if (snapshot.status === "degraded") {
-    return {
-      glyph: QUOTA_GLYPH,
-      text: "telemetry",
-      segments: [{ role: "value", text: "telemetry" }],
-      tone: options.stale ? "stale" : "muted",
-    };
-  }
-
-  const windows = orderQuotaWindows(snapshot.windows).slice(0, 2);
-  if (windows.length === 0) return undefined;
-
-  const joinWindows = (withReset: boolean): StatusSegment[] =>
-    windows.flatMap((quotaWindow, index) => [
-      // A separator takes the worse remaining quota of the windows it joins.
-      ...(index === 0
-        ? []
-        : [{
-            role: "value" as const,
-            text: " · ",
-            remainingPercent: Math.min(
-              windows[index - 1].remainingPercent,
-              quotaWindow.remainingPercent,
-            ),
-          }]),
-      ...windowSegments(quotaWindow, options.nowSeconds, withReset),
-    ]);
-
-  // Width degradation: omit reset segments first, then secondary windows.
-  const candidates = [
-    joinWindows(true),
-    joinWindows(false),
-    windowSegments(windows[0], options.nowSeconds, false),
-  ];
-
-  const segmentText = (segments: readonly StatusSegment[]) =>
-    segments.map((segment) => segment.text).join("");
-  const fits = (segments: readonly StatusSegment[]) =>
-    options.width === undefined ||
-    QUOTA_GLYPH.length + 1 + segmentText(segments).length <= options.width;
-  const segments = candidates.find(fits) ?? candidates[candidates.length - 1];
-  return {
-    glyph: QUOTA_GLYPH,
-    text: segmentText(segments),
-    segments,
-    tone: options.stale ? "stale" : "normal",
-  };
 }

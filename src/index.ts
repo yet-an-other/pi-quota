@@ -12,7 +12,7 @@ import {
   type ScheduleTimeout,
 } from "./quota-lifecycle.ts";
 import { isSupportedProvider, PROVIDER_ADAPTERS } from "./provider-registry.ts";
-import { renderQuotaDetails } from "./quota-render.ts";
+import { renderQuotaDetails } from "./quota-details.ts";
 
 export interface PiQuotaDeps {
   readonly fetchFn?: typeof fetch;

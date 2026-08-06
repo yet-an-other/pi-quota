@@ -20,7 +20,7 @@ import {
   clearProviderStatus,
   renderProviderStatus,
   type StatusPresenterDeps,
-} from "./status-presenter.ts";
+} from "./quota-footer.ts";
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const AUTOMATIC_THROTTLE_SECONDS = 60;
