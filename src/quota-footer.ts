@@ -23,10 +23,10 @@ export const QUOTA_GLYPH = "◷";
 export const RESET_GLYPH = "↻";
 
 /**
- * Footer text segment: the quota window label or the remaining-quota body.
- * Segments let painting color labels differently from values.
+ * Footer text segment: the quota window label, the remaining-quota body, or
+ * a divider between quota windows.
  */
-export type StatusSegmentRole = "label" | "value";
+export type StatusSegmentRole = "label" | "value" | "separator";
 export interface StatusSegment {
   readonly role: StatusSegmentRole;
   readonly text: string;
@@ -84,17 +84,7 @@ export function renderQuotaStatus(
 
   const joinWindows = (withReset: boolean): StatusSegment[] =>
     windows.flatMap((quotaWindow, index) => [
-      // A separator takes the worse remaining quota of the windows it joins.
-      ...(index === 0
-        ? []
-        : [{
-            role: "value" as const,
-            text: " · ",
-            remainingPercent: Math.min(
-              windows[index - 1].remainingPercent,
-              quotaWindow.remainingPercent,
-            ),
-          }]),
+      ...(index === 0 ? [] : [{ role: "separator" as const, text: " · " }]),
       ...windowSegments(quotaWindow, options.nowSeconds, withReset),
     ]);
 
@@ -129,13 +119,13 @@ function severityColor(
   return remainingPercent >= 10 ? "warning" : "error";
 }
 
-/** Paints a value segment: severity-colored text around a success-colored reset glyph. */
+/** Paints a value segment: percent, reset glyph, and countdown share the severity color. */
 function paintValue(theme: Theme, text: string, remainingPercent: number | undefined): string {
   const color = severityColor(remainingPercent);
   return text
     .split(RESET_GLYPH)
     .map((part, index) =>
-      `${index === 0 ? "" : theme.fg("success", RESET_GLYPH)}` +
+      `${index === 0 ? "" : theme.fg(color, RESET_GLYPH)}` +
       `${part === "" ? "" : theme.fg(color, part)}`)
     .join("");
 }
@@ -145,12 +135,14 @@ function paintText(theme: Theme, rendered: RenderedQuotaStatus): string {
   if (rendered.tone !== "normal") {
     return theme.fg(rendered.tone === "stale" ? "muted" : "dim", rendered.text);
   }
-  // Labels take the success color; values take the severity color of their window.
+  // Labels take the success color; dividers match pi's own footer dividers;
+  // values take the severity color of their window.
   return rendered.segments
-    .map((segment) =>
-      segment.role === "label"
-        ? theme.fg("success", segment.text)
-        : paintValue(theme, segment.text, segment.remainingPercent))
+    .map((segment) => {
+      if (segment.role === "label") return theme.fg("success", segment.text);
+      if (segment.role === "separator") return theme.fg("dim", segment.text);
+      return paintValue(theme, segment.text, segment.remainingPercent);
+    })
     .join("");
 }
 

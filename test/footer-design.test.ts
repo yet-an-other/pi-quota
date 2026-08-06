@@ -32,7 +32,7 @@ describe("quota footer design", () => {
       ["success", "◷"],
       ["success", "5h:"],
       ["success", " 60% "], ["success", "↻"], ["success", " 3h12m"],
-      ["success", " · "],
+      ["dim", " · "], // dividers match pi's own footer dividers
       ["success", "7d:"],
       ["success", " 75% "], ["success", "↻"], ["success", " 5d0h"],
     ]);
@@ -51,10 +51,10 @@ describe("quota footer design", () => {
     assert.deepEqual(painted, [
       ["success", "◷"],
       ["success", "5h:"],
-      ["error", " 5% "], ["success", "↻"], ["error", " 3h12m"],
-      ["error", " · "], // separator takes the worse of the joined windows
+      ["error", " 5% "], ["error", "↻"], ["error", " 3h12m"],
+      ["dim", " · "], // dividers match pi's own footer dividers
       ["success", "7d:"],
-      ["warning", " 15% "], ["success", "↻"], ["warning", " 5d0h"],
+      ["warning", " 15% "], ["warning", "↻"], ["warning", " 5d0h"],
     ]);
   });
 });
