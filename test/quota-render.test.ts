@@ -73,7 +73,12 @@ describe("quota footer rendering", () => {
 
     const rendered = renderQuotaStatus(snapshot, { nowSeconds: NOW });
 
-    assert.deepEqual(rendered, { glyph: QUOTA_GLYPH, text: "telemetry", tone: "muted" });
+    assert.deepEqual(rendered, {
+      glyph: QUOTA_GLYPH,
+      text: "telemetry",
+      segments: [{ role: "value", text: "telemetry" }],
+      tone: "muted",
+    });
   });
 });
 

@@ -21,9 +21,22 @@ import type { QuotaState } from "./quota-lifecycle.ts";
 export const QUOTA_GLYPH = "◷";
 export const RESET_GLYPH = "↻";
 
+/**
+ * Footer text segment: the quota window label or the remaining-quota body.
+ * Segments let presenters color labels differently from values.
+ */
+export type StatusSegmentRole = "label" | "value";
+export interface StatusSegment {
+  readonly role: StatusSegmentRole;
+  readonly text: string;
+  /** Remaining quota of the quota window this segment belongs to, when applicable. */
+  readonly remainingPercent?: number;
+}
+
 export interface RenderedQuotaStatus {
   readonly glyph: string;
   readonly text: string;
+  readonly segments: readonly StatusSegment[];
   readonly tone: "normal" | "muted" | "stale";
 }
 
@@ -33,12 +46,28 @@ export interface RenderOptions {
   readonly width?: number;
   /** Last renderable snapshot is being preserved after a failed refresh. */
   readonly stale?: boolean;
+  /**
+   * Footer layout: "compact" renders "5h 86% ↻3h52m", "spaced" renders
+   * "5h: 86% ↻ 3h52m". Defaults to "compact".
+   */
+  readonly layout?: "compact" | "spaced";
 }
 
-function windowText(quotaWindow: QuotaWindow, nowSeconds: number, withReset: boolean): string {
-  const base = `${quotaWindow.label} ${quotaWindow.remainingPercent}%`;
-  if (!withReset || quotaWindow.resetAtSeconds === undefined) return base;
-  return `${base} ${RESET_GLYPH}${formatResetCountdown(quotaWindow.resetAtSeconds, nowSeconds)}`;
+function windowSegments(
+  quotaWindow: QuotaWindow,
+  nowSeconds: number,
+  withReset: boolean,
+  spaced: boolean,
+): StatusSegment[] {
+  let value = ` ${quotaWindow.remainingPercent}%`;
+  if (withReset && quotaWindow.resetAtSeconds !== undefined) {
+    const countdown = formatResetCountdown(quotaWindow.resetAtSeconds, nowSeconds);
+    value += spaced ? ` ${RESET_GLYPH} ${countdown}` : ` ${RESET_GLYPH}${countdown}`;
+  }
+  return [
+    { role: "label", text: spaced ? `${quotaWindow.label}:` : quotaWindow.label },
+    { role: "value", text: value, remainingPercent: quotaWindow.remainingPercent },
+  ];
 }
 
 const SOURCE_LABELS: Readonly<Record<QuotaSourceKind, string>> = {
@@ -140,22 +169,48 @@ export function renderQuotaStatus(
     return {
       glyph: QUOTA_GLYPH,
       text: "telemetry",
+      segments: [{ role: "value", text: "telemetry" }],
       tone: options.stale ? "stale" : "muted",
     };
   }
 
   const windows = orderQuotaWindows(snapshot.windows).slice(0, 2);
   if (windows.length === 0) return undefined;
+  const spaced = options.layout === "spaced";
+
+  const joinWindows = (withReset: boolean): StatusSegment[] =>
+    windows.flatMap((quotaWindow, index) => [
+      // A separator takes the worse remaining quota of the windows it joins.
+      ...(index === 0
+        ? []
+        : [{
+            role: "value" as const,
+            text: " · ",
+            remainingPercent: Math.min(
+              windows[index - 1].remainingPercent,
+              quotaWindow.remainingPercent,
+            ),
+          }]),
+      ...windowSegments(quotaWindow, options.nowSeconds, withReset, spaced),
+    ]);
 
   // Width degradation: omit reset segments first, then secondary windows.
   const candidates = [
-    windows.map((w) => windowText(w, options.nowSeconds, true)).join(" · "),
-    windows.map((w) => windowText(w, options.nowSeconds, false)).join(" · "),
-    windowText(windows[0], options.nowSeconds, false),
+    joinWindows(true),
+    joinWindows(false),
+    windowSegments(windows[0], options.nowSeconds, false, spaced),
   ];
 
-  const fits = (text: string) =>
-    options.width === undefined || QUOTA_GLYPH.length + 1 + text.length <= options.width;
-  const text = candidates.find(fits) ?? candidates[candidates.length - 1];
-  return { glyph: QUOTA_GLYPH, text, tone: options.stale ? "stale" : "normal" };
+  const segmentText = (segments: readonly StatusSegment[]) =>
+    segments.map((segment) => segment.text).join("");
+  const fits = (segments: readonly StatusSegment[]) =>
+    options.width === undefined ||
+    QUOTA_GLYPH.length + 1 + segmentText(segments).length <= options.width;
+  const segments = candidates.find(fits) ?? candidates[candidates.length - 1];
+  return {
+    glyph: QUOTA_GLYPH,
+    text: segmentText(segments),
+    segments,
+    tone: options.stale ? "stale" : "normal",
+  };
 }

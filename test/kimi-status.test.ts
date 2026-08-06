@@ -6,7 +6,7 @@ import { NOW, stubFetch, VALID_PAYLOAD, jsonResponse } from "./kimi-fixtures.ts"
 
 const KIMI_AUTH = { headers: { Authorization: "Bearer kimi-oauth-token" } };
 const KIMI_BASE_URL = "https://api.kimi.com/coding";
-const FOOTER = "◷ 5h 60% ↻3h12m · 7d 75% ↻5d0h";
+const FOOTER = "◷ 5h: 60% ↻ 3h12m · 7d: 75% ↻ 5d0h";
 
 function extensionDeps(
   handler: () => Response | Promise<Response> = () => jsonResponse(200, VALID_PAYLOAD),
@@ -52,7 +52,7 @@ describe("kimi footer status", () => {
 
     assert.deepEqual(statusCalls, [
       { id: "pi-quota", text: undefined },
-      { id: "pi-quota", text: "◷ 5h 60% ↻3h12m" },
+      { id: "pi-quota", text: "◷ 5h: 60% ↻ 3h12m" },
     ]);
   });
 

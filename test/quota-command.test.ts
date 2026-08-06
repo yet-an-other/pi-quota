@@ -193,7 +193,7 @@ describe("quota manual refresh command", () => {
     pending.resolve(responseFor("wham/usage"));
     await refresh;
 
-    assert.match(statusCalls.at(-1)?.text ?? "", /^◷ 5h 58%/u);
+    assert.match(statusCalls.at(-1)?.text ?? "", /^◷ 5h: 58%/u);
     assert.deepEqual(notifications, [{ message: "Quota refreshed", type: "info" }]);
   });
 

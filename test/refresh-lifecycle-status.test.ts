@@ -35,7 +35,7 @@ describe("automatic quota refresh events", () => {
     await host.emit("agent_settled", {}, ctx);
 
     assert.equal(calls.length, 2);
-    assert.match(statusCalls.at(-1)?.text ?? "", /^◷ 5h 58%/u);
+    assert.match(statusCalls.at(-1)?.text ?? "", /^◷ 5h: 58%/u);
   });
 
   it("coalesces settled triggers with an in-flight session refresh", async () => {
@@ -77,7 +77,7 @@ describe("automatic quota refresh events", () => {
     nowSeconds += 60;
     await host.emit("agent_settled", {}, ctx);
 
-    assert.match(statusCalls.at(-1)?.text ?? "", /^◷ 5h 58%/u);
+    assert.match(statusCalls.at(-1)?.text ?? "", /^◷ 5h: 58%/u);
     assert.deepEqual(
       themeCalls.slice(-2).map(({ color }) => color),
       ["warning", "muted"],

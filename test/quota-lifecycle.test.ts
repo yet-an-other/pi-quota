@@ -176,7 +176,7 @@ describe("quota lifecycle: stale last renderable state", () => {
 
     lifecycle.sessionStart(host);
     await flushAsync();
-    assert.match(statusCalls.at(-1) ?? "", /^\[accent:◷\] \[dim:5h 58%/u);
+    assert.match(statusCalls.at(-1) ?? "", /^\[success:◷\] \[success:5h:\]/u);
 
     nowSeconds += 60;
     lifecycle.agentSettled(host);
@@ -187,7 +187,7 @@ describe("quota lifecycle: stale last renderable state", () => {
     assert.equal(state?.lastRenderable?.status, "available");
     assert.equal(state?.stale, true);
     assert.equal(state?.consecutiveFailures, 1);
-    assert.match(statusCalls.at(-1) ?? "", /^\[warning:◷\] \[muted:5h 58%/u);
+    assert.match(statusCalls.at(-1) ?? "", /^\[warning:◷\] \[muted:5h: 58%/u);
   });
 });
 

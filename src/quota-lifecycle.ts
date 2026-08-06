@@ -174,6 +174,20 @@ export class QuotaLifecycle {
     if (host !== undefined) clearProviderStatus(host);
   }
 
+  /** Re-renders the active footer from session state, e.g. after a style change. */
+  rerenderStatus(host: QuotaLifecycleHost): void {
+    if (host.mode !== "tui" || host.provider === undefined || !this.matchesActive(host)) return;
+    this.activeHost = host;
+    const state = this.states.get(host.provider);
+    const stale = state?.stale === true && state.lastRenderable !== undefined;
+    const snapshot = stale ? state?.lastRenderable : state?.current;
+    if (snapshot === undefined || snapshot.status === "unavailable") {
+      clearProviderStatus(host);
+      return;
+    }
+    renderProviderStatus(host, snapshot, this.deps, stale);
+  }
+
   /** Read-only state seam for diagnostics and focused tests. */
   getState(provider: string): QuotaState | undefined {
     return this.states.get(provider);
