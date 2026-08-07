@@ -4,7 +4,7 @@ import registerExtension from "../src/index.ts";
 import { createContext, createExtensionHost } from "./mock-host.ts";
 import { NOW, VALID_PAYLOAD, ZAI_BASE_URL, jsonResponse, stubFetch } from "./zai-fixtures.ts";
 
-const FOOTER = "◷ 5h: 84% ↻ 4h0m · 30d: 55% ↻ 30d0h";
+const FOOTER = "◷ 5h: 86% ↻ 4h0m · 7d: 88% ↻ 6d0h";
 
 function extensionDeps(
   handler: () => Response | Promise<Response> = () => jsonResponse(200, VALID_PAYLOAD),

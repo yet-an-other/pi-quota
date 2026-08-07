@@ -4,32 +4,34 @@ import type { ProviderAdapterDeps } from "../src/quota-contract.ts";
 export const NOW = 1_735_689_000;
 export const ZAI_BASE_URL = "https://api.z.ai/api/coding/paas/v4";
 export const VALID_PAYLOAD = {
+  code: 200,
+  msg: "Operation successful",
   data: {
-    level: "pro",
+    level: "lite",
     limits: [
       {
-        type: "TOKENS_LIMIT",
+        type: "CREDIT_LIMIT",
         unit: 3,
         number: 5,
-        usage: 800000000,
-        currentValue: 127694464,
-        remaining: 672305536,
-        percentage: 16,
+        usage: 2000,
+        currentValue: 285,
+        remaining: 1714,
+        percentage: 14,
         nextResetTime: (NOW + 4 * 60 * 60) * 1000,
       },
       {
-        type: "TIME_LIMIT",
-        unit: 5,
+        type: "CREDIT_LIMIT",
+        unit: 6,
         number: 1,
-        usage: 4000,
-        currentValue: 1828,
-        remaining: 2172,
-        percentage: 45,
-        nextResetTime: (NOW + 30 * 24 * 60 * 60) * 1000,
-        usageDetails: [{ modelCode: "search-prime", usage: 1433 }],
+        usage: 10000,
+        currentValue: 1209,
+        remaining: 8790,
+        percentage: 12,
+        nextResetTime: (NOW + 6 * 24 * 60 * 60) * 1000,
       },
     ],
   },
+  success: true,
 };
 
 export interface FetchCall {

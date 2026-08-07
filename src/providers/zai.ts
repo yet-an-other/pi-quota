@@ -39,14 +39,16 @@ const DETAIL_URL = "https://z.ai/manage-apikey/subscription";
 const RESET_HORIZON_SECONDS = 60 * 24 * 60 * 60;
 
 /**
- * First-party-confirmed window-duration codes mapped to per-unit second counts.
- * `unit` 3 is an hour and `unit` 5 is a month (approximated as 30 days). Other
- * codes seen in the wild (e.g. the weekly code) are not first-party confirmed,
- * so they contribute no `durationSeconds`.
+ * Window-duration codes mapped to per-unit second counts. `unit` 3 is an hour
+ * and `unit` 5 is a month (30-day approximation), both confirmed by the
+ * official Z.AI coding plugin's labels. `unit` 6 is a week, confirmed against
+ * a live account (a number-1 window whose reset lands ~7 days out). Other
+ * codes contribute no `durationSeconds` and fall back to a type-based label.
  */
 const UNIT_SECONDS: Readonly<Record<number, number>> = {
   3: 3600,
   5: 30 * 86400,
+  6: 7 * 86400,
 };
 
 function zaiQuotaSource(fetchedAtSeconds: number): QuotaSourceMeta {
@@ -133,14 +135,24 @@ function deriveDurationSeconds(entry: Record<string, unknown>): number | undefin
   return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : undefined;
 }
 
+const TYPE_FALLBACK_LABELS: Readonly<Record<string, string>> = {
+  CREDIT_LIMIT: "credits",
+  TOKENS_LIMIT: "tokens",
+  TIME_LIMIT: "tools",
+};
+
+/** Label for a window whose duration code is unknown, derived from its type. */
 function typeFallbackLabel(type: string): string {
-  return type === "TIME_LIMIT" ? "tools" : "tokens";
+  return TYPE_FALLBACK_LABELS[type] ?? type.toLowerCase().replace("_limit", "");
 }
 
 function parseWindow(entry: unknown, nowSeconds: number): QuotaWindow | undefined {
   if (!isRecord(entry)) return undefined;
   const type = entry["type"];
-  if (type !== "TOKENS_LIMIT" && type !== "TIME_LIMIT") return undefined;
+  // The type string only labels the window; any type with derivable quota
+  // values is accepted. Accounts report CREDIT_LIMIT, TOKENS_LIMIT, TIME_LIMIT,
+  // and more, so an unrecognized type must never suppress the footer.
+  if (typeof type !== "string" || type === "") return undefined;
 
   const remainingPercent = deriveRemainingPercent(entry);
   if (remainingPercent === undefined) return undefined;

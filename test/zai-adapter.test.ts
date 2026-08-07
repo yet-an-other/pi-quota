@@ -27,18 +27,18 @@ describe("Z.AI adapter: validated windows", () => {
       provider: "zai",
       windows: [
         {
-          id: `zai-TOKENS_LIMIT-3-5-${(NOW + 4 * HOUR) * 1000}`,
+          id: `zai-CREDIT_LIMIT-3-5-${(NOW + 4 * HOUR) * 1000}`,
           label: "5h",
-          remainingPercent: 84,
+          remainingPercent: 86,
           durationSeconds: 5 * HOUR,
           resetAtSeconds: NOW + 4 * HOUR,
         },
         {
-          id: `zai-TIME_LIMIT-5-1-${(NOW + 30 * DAY) * 1000}`,
-          label: "30d",
-          remainingPercent: 55,
-          durationSeconds: 30 * DAY,
-          resetAtSeconds: NOW + 30 * DAY,
+          id: `zai-CREDIT_LIMIT-6-1-${(NOW + 6 * DAY) * 1000}`,
+          label: "7d",
+          remainingPercent: 88,
+          durationSeconds: 7 * DAY,
+          resetAtSeconds: NOW + 6 * DAY,
         },
       ],
       source: SOURCE,
@@ -176,11 +176,11 @@ describe("Z.AI adapter: window duration and labels", () => {
     });
   });
 
-  it("omits duration and uses a type-based label for unverified unit codes", async () => {
+  it("omits duration and uses a type-based label for unknown unit codes", async () => {
     const payload = {
       data: {
         limits: [
-          { type: "TOKENS_LIMIT", unit: 6, number: 7, percentage: 20, nextResetTime: (NOW + 6 * DAY) * 1000 },
+          { type: "TOKENS_LIMIT", unit: 9, number: 1, percentage: 20, nextResetTime: (NOW + 6 * DAY) * 1000 },
         ],
       },
     };
@@ -191,7 +191,7 @@ describe("Z.AI adapter: window duration and labels", () => {
     assert.equal(snapshot.status, "available");
     if (snapshot.status !== "available") return;
     assert.deepEqual(snapshot.windows[0], {
-      id: `zai-TOKENS_LIMIT-6-7-${(NOW + 6 * DAY) * 1000}`,
+      id: `zai-TOKENS_LIMIT-9-1-${(NOW + 6 * DAY) * 1000}`,
       label: "tokens",
       remainingPercent: 80,
       resetAtSeconds: NOW + 6 * DAY,
@@ -271,7 +271,7 @@ describe("Z.AI adapter: duplicate windows", () => {
 });
 
 describe("Z.AI adapter: schema validation", () => {
-  it("drops unknown types and invalid fields while preserving validated windows", async () => {
+  it("accepts any limit type with valid quota values and drops only unparseable entries", async () => {
     const payload = {
       data: {
         limits: [
@@ -288,6 +288,7 @@ describe("Z.AI adapter: schema validation", () => {
     assert.equal(snapshot.status, "available");
     if (snapshot.status !== "available") return;
     assert.deepEqual(snapshot.windows, [
+      { id: "zai-NEW_LIMIT-?-?-?", label: "new", remainingPercent: 9 },
       {
         id: `zai-TIME_LIMIT-5-1-${(NOW + DAY) * 1000}`,
         label: "30d",
@@ -304,7 +305,7 @@ describe("Z.AI adapter: schema validation", () => {
       { data: {} },
       { data: { limits: "not-an-array" } },
       { data: { limits: [{ type: "TOKENS_LIMIT", percentage: "unknown" }] } },
-      { data: { limits: [{ type: "UNKNOWN", percentage: 42 }] } },
+      { data: { limits: [{ type: "UNKNOWN", usage: -1 }] } },
     ]) {
       const snapshot = await fetchZaiQuotaSnapshot(
         zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
