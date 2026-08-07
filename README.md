@@ -27,9 +27,9 @@ Pi packages execute code with your user permissions. Review third-party package 
 | --- | --- | --- |
 | OpenAI Codex (`openai-codex`) | Validated remaining percentages and reset windows | First-party, undocumented ChatGPT usage endpoint |
 | Kimi For Coding (`kimi-coding`) | Validated remaining percentages and reset windows | First-party, experimental Kimi usage endpoint |
-| Z.AI global (`zai`) | Telemetry indicator only | First-party, undocumented monitor endpoint |
+| Z.AI global (`zai`) | Validated remaining percentages and reset windows | First-party, undocumented monitor endpoint |
 
-Z.AI's reported values do not have sufficiently verified semantics to call them remaining quota or reset windows. Pi Quota therefore labels them as **unknown-semantics quota telemetry** and never invents remaining-capacity or reset information. The separate Z.AI Coding Plan CN integration is not treated as the global `zai` provider.
+Z.AI's monitor endpoint is undocumented and internally owned, so its payload may change without notice; Pi Quota treats it as first-party-private and still never invents remaining-capacity or reset information. The separate Z.AI Coding Plan CN integration is not treated as the global `zai` provider.
 
 Unsupported providers render no quota status and produce no notification. JSON, print, and RPC modes also remain silent; footer status and `/quota` are TUI-only.
 
@@ -47,7 +47,7 @@ Narrow terminals drop reset countdowns and then the second window. Failed refres
 
 ### `/quota`
 
-Fetches any supported providers not yet inspected in this session and opens an all-provider diagnostic view. It marks the active provider and shows only normalized status, source stability, freshness, validated windows, sanitized failure reasons, or unknown-semantics telemetry.
+Fetches any supported providers not yet inspected in this session and opens an all-provider diagnostic view. It marks the active provider and shows only normalized status, source stability, freshness, validated windows, or sanitized failure reasons.
 
 ### `/quota refresh`
 
@@ -78,10 +78,6 @@ Run `/quota` to compare all supported providers. Its failure labels distinguish 
 
 A refresh failed after the same provider had produced renderable data. Pi Quota preserves that last value rather than clearing it or rendering zero. Run `/quota refresh`; if the provider remains unavailable, the command fails within eight seconds and the stale value remains.
 
-### Z.AI says `telemetry`
-
-This is expected degraded behavior. `/quota` can show validated provider-reported values under **Unknown semantics**, but Pi Quota does not interpret them as remaining capacity or reset timing.
-
 ### `/quota` does nothing
 
 The command is intentionally silent outside the interactive TUI. Start Pi normally rather than in print, JSON, or RPC mode.
@@ -94,7 +90,7 @@ Automated tests do not contact live providers. Before a release, test with real 
 
 - [ ] In a clean user-scoped Pi configuration, run `pi install git:github.com/yet-an-other/pi-quota` without `-l`; `pi list` shows the Git package.
 - [ ] Start Pi in an untrusted project with no project-local Pi Quota files or settings; the extension loads without a project trust requirement or setup prompt.
-- [ ] Start a TUI session on each authenticated supported provider; Codex and Kimi show validated windows, while global Z.AI shows only `◷ telemetry`.
+- [ ] Start a TUI session on each authenticated supported provider; Codex, Kimi, and Z.AI each show validated windows.
 - [ ] Start without credentials for a supported provider; Pi starts normally and the quota footer remains empty.
 
 ### Refresh lifecycle
@@ -111,7 +107,7 @@ Automated tests do not contact live providers. Before a release, test with real 
 - [ ] Restore the network and refresh again; current rendering replaces the stale state.
 - [ ] Switch to an unsupported provider such as Anthropic; the quota footer clears with no Pi Quota error or notification.
 - [ ] Run Pi in print, JSON, and RPC modes; Pi Quota emits no footer, dialog, notification, or provider request.
-- [ ] With global Z.AI active, confirm the footer says only `telemetry`; `/quota` places values under **Unknown semantics** and shows no remaining-capacity wording or reset timestamp.
+- [ ] With global Z.AI active, block its monitor endpoint and run `/quota refresh`; Pi reports failure within eight seconds, renders no invented zero, and preserves any prior Z.AI value as stale.
 
 ### Diagnostics and credential hygiene
 
