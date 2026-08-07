@@ -5,14 +5,28 @@ export const NOW = 1_735_689_000;
 export const ZAI_BASE_URL = "https://api.z.ai/api/coding/paas/v4";
 export const VALID_PAYLOAD = {
   data: {
+    level: "pro",
     limits: [
-      { type: "TOKENS_LIMIT", percentage: 61 },
+      {
+        type: "TOKENS_LIMIT",
+        unit: 3,
+        number: 5,
+        usage: 800000000,
+        currentValue: 127694464,
+        remaining: 672305536,
+        percentage: 16,
+        nextResetTime: (NOW + 4 * 60 * 60) * 1000,
+      },
       {
         type: "TIME_LIMIT",
-        percentage: 25,
-        currentValue: 7,
-        usage: 3,
-        usageDetails: [{ ignored: "opaque" }],
+        unit: 5,
+        number: 1,
+        usage: 4000,
+        currentValue: 1828,
+        remaining: 2172,
+        percentage: 45,
+        nextResetTime: (NOW + 30 * 24 * 60 * 60) * 1000,
+        usageDetails: [{ modelCode: "search-prime", usage: 1433 }],
       },
     ],
   },

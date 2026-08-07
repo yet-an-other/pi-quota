@@ -1,28 +1,53 @@
 /**
  * Global Z.AI provider adapter.
  *
- * The first-party monitor endpoint and payload are undocumented. The adapter
- * therefore exposes validated values only as quota telemetry with explicitly
- * unknown semantics; it never derives quota windows, remaining capacity, or
- * reset times.
+ * Resolves Pi's `zai` credential at fetch time and performs one read-only
+ * request against Z.AI's first-party monitor endpoint. The endpoint is
+ * undocumented and internally owned — it is absent from Z.AI's public API
+ * reference and is reached via the official Z.AI coding plugin — so the source
+ * stays first-party-private and the payload may change without notice. Parsing
+ * is tolerant: invalid values are dropped and missing values remain unknown,
+ * never zero.
+ *
+ * Field semantics are validated against first-party code and live response
+ * samples: `percentage` is the used percent, `usage` is the window capacity,
+ * `currentValue` is the used amount, and `nextResetTime` is Unix epoch
+ * milliseconds. Window-duration codes are only partly verified, so
+ * `durationSeconds` is derived solely for the first-party-confirmed codes.
  */
 
 import {
   asFiniteNumber,
+  clampRemainingPercent,
   isRecord,
   type ProviderAdapterDeps,
   type QuotaSnapshot,
   type QuotaSourceMeta,
-  type QuotaTelemetry,
+  type QuotaWindow,
   type ResolvedProviderAuth,
   type UnavailableReason,
 } from "../quota-contract.ts";
+import { formatWindowDuration } from "../quota-time.ts";
 
 export const ZAI_PROVIDER = "zai";
 
 const ZAI_ORIGIN = "https://api.z.ai";
 const USAGE_URL = `${ZAI_ORIGIN}/api/monitor/usage/quota/limit`;
 const DETAIL_URL = "https://z.ai/manage-apikey/subscription";
+
+/** Plausible-reset horizon: comfortably covers monthly windows, rejects garbage. */
+const RESET_HORIZON_SECONDS = 60 * 24 * 60 * 60;
+
+/**
+ * First-party-confirmed window-duration codes mapped to per-unit second counts.
+ * `unit` 3 is an hour and `unit` 5 is a month (approximated as 30 days). Other
+ * codes seen in the wild (e.g. the weekly code) are not first-party confirmed,
+ * so they contribute no `durationSeconds`.
+ */
+const UNIT_SECONDS: Readonly<Record<number, number>> = {
+  3: 3600,
+  5: 30 * 86400,
+};
 
 function zaiQuotaSource(fetchedAtSeconds: number): QuotaSourceMeta {
   return {
@@ -44,46 +69,106 @@ export function unavailableZaiQuotaSnapshot(
   };
 }
 
-function validatedPercentage(value: unknown): number | undefined {
-  const percentage = asFiniteNumber(value);
-  return percentage !== undefined && percentage >= 0 && percentage <= 100
-    ? percentage
-    : undefined;
+/**
+ * Stable window identifier keyed on the distinguishing fields, with the
+ * reset time as a tie-breaker so two windows that share type/unit/number but
+ * reset at different times are kept apart rather than collapsed.
+ */
+function windowId(type: string, entry: Record<string, unknown>): string {
+  const unit = asFiniteNumber(entry["unit"]);
+  const count = asFiniteNumber(entry["number"]);
+  const resetMs = asFiniteNumber(entry["nextResetTime"]);
+  return `zai-${type}-${unit ?? "?"}-${count ?? "?"}-${resetMs ?? "?"}`;
 }
 
-function validatedCounter(value: unknown): number | undefined {
-  const counter = asFiniteNumber(value);
-  return counter !== undefined && counter >= 0 ? counter : undefined;
+/**
+ * Derives remaining percent from `percentage` (the used percent). Falls back to
+ * `currentValue` / `usage` when `percentage` is absent and `usage` is positive.
+ */
+function deriveRemainingPercent(entry: Record<string, unknown>): number | undefined {
+  const usedPercent = asFiniteNumber(entry["percentage"]);
+  if (usedPercent !== undefined) return clampRemainingPercent(usedPercent);
+
+  const usage = asFiniteNumber(entry["usage"]);
+  const currentValue = asFiniteNumber(entry["currentValue"]);
+  if (
+    usage === undefined ||
+    usage <= 0 ||
+    currentValue === undefined ||
+    currentValue < 0
+  ) {
+    return undefined;
+  }
+  return clampRemainingPercent((currentValue / usage) * 100);
 }
 
-function parseTelemetry(value: unknown): QuotaTelemetry | undefined {
-  if (!isRecord(value)) return undefined;
+/** Derives reset seconds from `nextResetTime` only when it is a plausible future. */
+function deriveResetAtSeconds(
+  entry: Record<string, unknown>,
+  nowSeconds: number,
+): number | undefined {
+  const milliseconds = asFiniteNumber(entry["nextResetTime"]);
+  if (milliseconds === undefined) return undefined;
+  const seconds = milliseconds / 1000;
+  if (!Number.isFinite(seconds) || seconds <= nowSeconds) return undefined;
+  if (seconds > nowSeconds + RESET_HORIZON_SECONDS) return undefined;
+  return seconds;
+}
 
-  const type = value["type"];
+/** Derives duration seconds for first-party-confirmed `unit` codes only. */
+function deriveDurationSeconds(entry: Record<string, unknown>): number | undefined {
+  const unit = asFiniteNumber(entry["unit"]);
+  const count = asFiniteNumber(entry["number"]);
+  if (
+    unit === undefined ||
+    count === undefined ||
+    !Number.isSafeInteger(count) ||
+    count <= 0
+  ) {
+    return undefined;
+  }
+  const perUnit = UNIT_SECONDS[unit];
+  if (perUnit === undefined) return undefined;
+  const seconds = perUnit * count;
+  return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : undefined;
+}
+
+function typeFallbackLabel(type: string): string {
+  return type === "TIME_LIMIT" ? "tools" : "tokens";
+}
+
+function parseWindow(entry: unknown, nowSeconds: number): QuotaWindow | undefined {
+  if (!isRecord(entry)) return undefined;
+  const type = entry["type"];
   if (type !== "TOKENS_LIMIT" && type !== "TIME_LIMIT") return undefined;
 
-  const percent = validatedPercentage(value["percentage"]);
-  const currentValue = validatedCounter(value["currentValue"]);
-  const usage = validatedCounter(value["usage"]);
-  const counters = {
-    ...(currentValue === undefined ? {} : { currentValue }),
-    ...(usage === undefined ? {} : { usage }),
-  };
-  if (percent === undefined && Object.keys(counters).length === 0) return undefined;
+  const remainingPercent = deriveRemainingPercent(entry);
+  if (remainingPercent === undefined) return undefined;
 
-  const tokenTelemetry = type === "TOKENS_LIMIT";
+  const durationSeconds = deriveDurationSeconds(entry);
+  const resetAtSeconds = deriveResetAtSeconds(entry, nowSeconds);
+  const label =
+    durationSeconds !== undefined
+      ? formatWindowDuration(durationSeconds)
+      : typeFallbackLabel(type);
+
   return {
-    id: tokenTelemetry ? "zai-tokens-limit" : "zai-time-limit",
-    providerLabel: tokenTelemetry ? "Z.AI token telemetry" : "Z.AI time telemetry",
-    ...(percent === undefined ? {} : { percent }),
-    ...(Object.keys(counters).length === 0 ? {} : { counters }),
-    semantics: "unknown",
+    id: windowId(type, entry),
+    label,
+    remainingPercent,
+    ...(durationSeconds === undefined ? {} : { durationSeconds }),
+    ...(resetAtSeconds === undefined ? {} : { resetAtSeconds }),
   };
 }
 
-function hasAuthorizationHeader(headers: Readonly<Record<string, string | null>> | undefined): boolean {
+function hasAuthorizationHeader(
+  headers: Readonly<Record<string, string | null>> | undefined,
+): boolean {
   return Object.entries(headers ?? {}).some(
-    ([name, value]) => name.toLowerCase() === "authorization" && typeof value === "string" && value.trim() !== "",
+    ([name, value]) =>
+      name.toLowerCase() === "authorization" &&
+      typeof value === "string" &&
+      value.trim() !== "",
   );
 }
 
@@ -97,7 +182,8 @@ function originOf(value: string | undefined): string | undefined {
 }
 
 export async function fetchZaiQuotaSnapshot(deps: ProviderAdapterDeps): Promise<QuotaSnapshot> {
-  const source = zaiQuotaSource(deps.nowSeconds());
+  const nowSeconds = deps.nowSeconds();
+  const source = zaiQuotaSource(nowSeconds);
   const unavailable = (reason: UnavailableReason) =>
     unavailableZaiQuotaSnapshot(reason, source.fetchedAtSeconds);
 
@@ -151,16 +237,16 @@ export async function fetchZaiQuotaSnapshot(deps: ProviderAdapterDeps): Promise<
     return unavailable("schema-drift");
   }
 
-  const limits = body["data"]["limits"];
-  const knownTypes = limits.flatMap((entry) => {
-    if (!isRecord(entry)) return [];
-    const type = entry["type"];
-    return type === "TOKENS_LIMIT" || type === "TIME_LIMIT" ? [type] : [];
+  const windows: QuotaWindow[] = [];
+  const seenIds = new Set<string>();
+  body["data"]["limits"].forEach((entry) => {
+    const quotaWindow = parseWindow(entry, nowSeconds);
+    if (quotaWindow === undefined) return;
+    if (seenIds.has(quotaWindow.id)) return; // dedupe identical windows
+    seenIds.add(quotaWindow.id);
+    windows.push(quotaWindow);
   });
-  if (new Set(knownTypes).size !== knownTypes.length) return unavailable("ambiguous");
+  if (windows.length === 0) return unavailable("schema-drift");
 
-  const telemetry = limits.map(parseTelemetry).filter((item) => item !== undefined);
-  if (telemetry.length === 0) return unavailable("schema-drift");
-
-  return { status: "degraded", provider: ZAI_PROVIDER, telemetry, source };
+  return { status: "available", provider: ZAI_PROVIDER, windows, source };
 }

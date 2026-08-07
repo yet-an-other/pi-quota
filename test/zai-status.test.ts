@@ -4,6 +4,8 @@ import registerExtension from "../src/index.ts";
 import { createContext, createExtensionHost } from "./mock-host.ts";
 import { NOW, VALID_PAYLOAD, ZAI_BASE_URL, jsonResponse, stubFetch } from "./zai-fixtures.ts";
 
+const FOOTER = "◷ 5h: 84% ↻ 4h0m · 30d: 55% ↻ 30d0h";
+
 function extensionDeps(
   handler: () => Response | Promise<Response> = () => jsonResponse(200, VALID_PAYLOAD),
 ) {
@@ -12,7 +14,7 @@ function extensionDeps(
 }
 
 describe("Z.AI footer status", () => {
-  it("renders only the degraded telemetry indicator after session start", async () => {
+  it("renders validated Z.AI quota windows after session start", async () => {
     const host = createExtensionHost();
     const deps = extensionDeps();
     registerExtension(host.api, deps);
@@ -26,12 +28,12 @@ describe("Z.AI footer status", () => {
 
     assert.deepEqual(statusCalls, [
       { id: "pi-quota", text: undefined },
-      { id: "pi-quota", text: "◷ telemetry" },
+      { id: "pi-quota", text: FOOTER },
     ]);
     assert.equal(deps.calls.length, 1);
   });
 
-  it("renders nothing when monitor telemetry has drifted", async () => {
+  it("renders nothing when the monitor payload has drifted", async () => {
     const host = createExtensionHost();
     const deps = extensionDeps(() => jsonResponse(200, { data: { limits: [] } }));
     registerExtension(host.api, deps);
@@ -78,7 +80,7 @@ describe("Z.AI footer status", () => {
     assert.equal(deps.calls.length, 0);
   });
 
-  it("renders nothing when global Z.AI telemetry is unavailable", async () => {
+  it("renders nothing when the monitor endpoint is unavailable", async () => {
     const host = createExtensionHost();
     const deps = extensionDeps(async () => {
       throw new TypeError("fetch failed");

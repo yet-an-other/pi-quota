@@ -1,35 +1,47 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fetchZaiQuotaSnapshot } from "../src/providers/zai.ts";
-import { assertUnavailable, NOW, stubFetch, VALID_PAYLOAD, jsonResponse, zaiDeps } from "./zai-fixtures.ts";
+import {
+  assertUnavailable,
+  NOW,
+  stubFetch,
+  VALID_PAYLOAD,
+  jsonResponse,
+  zaiDeps,
+} from "./zai-fixtures.ts";
 
-describe("Z.AI adapter: validated telemetry", () => {
-  it("normalizes known monitor metrics only as unknown-semantics quota telemetry", async () => {
+const HOUR = 60 * 60;
+const DAY = 24 * HOUR;
+const SOURCE = {
+  kind: "first-party-private",
+  detailUrl: "https://z.ai/manage-apikey/subscription",
+  fetchedAtSeconds: NOW,
+} as const;
+
+describe("Z.AI adapter: validated windows", () => {
+  it("normalizes the monitor payload into validated quota windows", async () => {
     const snapshot = await fetchZaiQuotaSnapshot(zaiDeps());
 
-    assert.equal(snapshot.status, "degraded");
-    if (snapshot.status !== "degraded") return;
-
-    assert.equal(snapshot.provider, "zai");
-    assert.deepEqual(snapshot.telemetry, [
-      {
-        id: "zai-tokens-limit",
-        providerLabel: "Z.AI token telemetry",
-        percent: 61,
-        semantics: "unknown",
-      },
-      {
-        id: "zai-time-limit",
-        providerLabel: "Z.AI time telemetry",
-        percent: 25,
-        counters: { currentValue: 7, usage: 3 },
-        semantics: "unknown",
-      },
-    ]);
-    assert.deepEqual(snapshot.source, {
-      kind: "first-party-private",
-      detailUrl: "https://z.ai/manage-apikey/subscription",
-      fetchedAtSeconds: NOW,
+    assert.deepEqual(snapshot, {
+      status: "available",
+      provider: "zai",
+      windows: [
+        {
+          id: `zai-TOKENS_LIMIT-3-5-${(NOW + 4 * HOUR) * 1000}`,
+          label: "5h",
+          remainingPercent: 84,
+          durationSeconds: 5 * HOUR,
+          resetAtSeconds: NOW + 4 * HOUR,
+        },
+        {
+          id: `zai-TIME_LIMIT-5-1-${(NOW + 30 * DAY) * 1000}`,
+          label: "30d",
+          remainingPercent: 55,
+          durationSeconds: 30 * DAY,
+          resetAtSeconds: NOW + 30 * DAY,
+        },
+      ],
+      source: SOURCE,
     });
   });
 
@@ -53,14 +65,32 @@ describe("Z.AI adapter: validated telemetry", () => {
   });
 });
 
-describe("Z.AI adapter: schema validation", () => {
-  it("ignores unknown types and invalid fields while preserving validated opaque telemetry", async () => {
+describe("Z.AI adapter: remaining-percent derivation", () => {
+  it("derives remaining percent as 100 minus the used percentage", async () => {
+    const payload = {
+      data: { limits: [{ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 16 }] },
+    };
+    const snapshot = await fetchZaiQuotaSnapshot(
+      zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
+    );
+
+    assert.equal(snapshot.status, "available");
+    if (snapshot.status !== "available") return;
+    assert.equal(snapshot.windows[0]!.remainingPercent, 84);
+  });
+
+  it("falls back to currentValue / usage when percentage is absent", async () => {
     const payload = {
       data: {
         limits: [
-          { type: "NEW_LIMIT", percentage: 91 },
-          { type: "TOKENS_LIMIT", percentage: "61", usage: -1 },
-          { type: "TIME_LIMIT", percentage: 25, currentValue: Number.NaN, usage: 3 },
+          {
+            type: "TOKENS_LIMIT",
+            unit: 3,
+            number: 5,
+            usage: 1000,
+            currentValue: 250,
+            nextResetTime: (NOW + HOUR) * 1000,
+          },
         ],
       },
     };
@@ -68,20 +98,207 @@ describe("Z.AI adapter: schema validation", () => {
       zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
     );
 
-    assert.equal(snapshot.status, "degraded");
-    if (snapshot.status !== "degraded") return;
-    assert.deepEqual(snapshot.telemetry, [
+    assert.equal(snapshot.status, "available");
+    if (snapshot.status !== "available") return;
+    assert.deepEqual(snapshot.windows[0]!.remainingPercent, 75);
+  });
+});
+
+describe("Z.AI adapter: reset-time plausibility", () => {
+  it("keeps a reset time that is a plausible future", async () => {
+    const payload = {
+      data: {
+        limits: [
+          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 50, nextResetTime: (NOW + 2 * HOUR) * 1000 },
+        ],
+      },
+    };
+    const snapshot = await fetchZaiQuotaSnapshot(
+      zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
+    );
+
+    assert.equal(snapshot.status, "available");
+    if (snapshot.status !== "available") return;
+    assert.equal(snapshot.windows[0]!.resetAtSeconds, NOW + 2 * HOUR);
+  });
+
+  it("drops a reset time that is not a future timestamp", async () => {
+    const payload = {
+      data: {
+        limits: [
+          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 50, nextResetTime: (NOW - HOUR) * 1000 },
+        ],
+      },
+    };
+    const snapshot = await fetchZaiQuotaSnapshot(
+      zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
+    );
+
+    assert.equal(snapshot.status, "available");
+    if (snapshot.status !== "available") return;
+    assert.equal(snapshot.windows[0]!.resetAtSeconds, undefined);
+  });
+
+  it("drops a reset time beyond the plausible horizon", async () => {
+    const payload = {
+      data: {
+        limits: [
+          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 50, nextResetTime: (NOW + 365 * DAY) * 1000 },
+        ],
+      },
+    };
+    const snapshot = await fetchZaiQuotaSnapshot(
+      zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
+    );
+
+    assert.equal(snapshot.status, "available");
+    if (snapshot.status !== "available") return;
+    assert.equal(snapshot.windows[0]!.resetAtSeconds, undefined);
+  });
+});
+
+describe("Z.AI adapter: window duration and labels", () => {
+  it("derives duration and a formatter label for first-party-confirmed unit codes", async () => {
+    const payload = {
+      data: { limits: [{ type: "TIME_LIMIT", unit: 5, number: 1, percentage: 45 }] },
+    };
+    const snapshot = await fetchZaiQuotaSnapshot(
+      zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
+    );
+
+    assert.equal(snapshot.status, "available");
+    if (snapshot.status !== "available") return;
+    assert.deepEqual(snapshot.windows[0], {
+      id: "zai-TIME_LIMIT-5-1-?",
+      label: "30d",
+      remainingPercent: 55,
+      durationSeconds: 30 * DAY,
+    });
+  });
+
+  it("omits duration and uses a type-based label for unverified unit codes", async () => {
+    const payload = {
+      data: {
+        limits: [
+          { type: "TOKENS_LIMIT", unit: 6, number: 7, percentage: 20, nextResetTime: (NOW + 6 * DAY) * 1000 },
+        ],
+      },
+    };
+    const snapshot = await fetchZaiQuotaSnapshot(
+      zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
+    );
+
+    assert.equal(snapshot.status, "available");
+    if (snapshot.status !== "available") return;
+    assert.deepEqual(snapshot.windows[0], {
+      id: `zai-TOKENS_LIMIT-6-7-${(NOW + 6 * DAY) * 1000}`,
+      label: "tokens",
+      remainingPercent: 80,
+      resetAtSeconds: NOW + 6 * DAY,
+    });
+  });
+});
+
+describe("Z.AI adapter: duplicate windows", () => {
+  it("accepts two same-type windows keyed apart by unit and number", async () => {
+    const payload = {
+      data: {
+        limits: [
+          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 16, nextResetTime: (NOW + HOUR) * 1000 },
+          { type: "TOKENS_LIMIT", unit: 6, number: 7, percentage: 20, nextResetTime: (NOW + DAY) * 1000 },
+        ],
+      },
+    };
+    const snapshot = await fetchZaiQuotaSnapshot(
+      zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
+    );
+
+    assert.equal(snapshot.status, "available");
+    if (snapshot.status !== "available") return;
+    assert.equal(snapshot.windows.length, 2);
+    assert.deepEqual(
+      snapshot.windows.map((quotaWindow) => quotaWindow.id),
+      [
+        `zai-TOKENS_LIMIT-3-5-${(NOW + HOUR) * 1000}`,
+        `zai-TOKENS_LIMIT-6-7-${(NOW + DAY) * 1000}`,
+      ],
+    );
+  });
+
+  it("dedupes windows that share an identical identifier", async () => {
+    const payload = {
+      data: {
+        limits: [
+          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 16 },
+          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 18 },
+        ],
+      },
+    };
+    const snapshot = await fetchZaiQuotaSnapshot(
+      zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
+    );
+
+    assert.equal(snapshot.status, "available");
+    if (snapshot.status !== "available") return;
+    assert.equal(snapshot.windows.length, 1);
+    assert.equal(snapshot.windows[0]!.remainingPercent, 84);
+  });
+
+  it("keeps same-type/unit/number windows apart when their reset times differ", async () => {
+    const payload = {
+      data: {
+        limits: [
+          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 16, nextResetTime: (NOW + HOUR) * 1000 },
+          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 20, nextResetTime: (NOW + 2 * HOUR) * 1000 },
+        ],
+      },
+    };
+    const snapshot = await fetchZaiQuotaSnapshot(
+      zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
+    );
+
+    assert.equal(snapshot.status, "available");
+    if (snapshot.status !== "available") return;
+    assert.equal(snapshot.windows.length, 2);
+    assert.deepEqual(
+      snapshot.windows.map((quotaWindow) => quotaWindow.id),
+      [
+        `zai-TOKENS_LIMIT-3-5-${(NOW + HOUR) * 1000}`,
+        `zai-TOKENS_LIMIT-3-5-${(NOW + 2 * HOUR) * 1000}`,
+      ],
+    );
+  });
+});
+
+describe("Z.AI adapter: schema validation", () => {
+  it("drops unknown types and invalid fields while preserving validated windows", async () => {
+    const payload = {
+      data: {
+        limits: [
+          { type: "NEW_LIMIT", percentage: 91 },
+          { type: "TOKENS_LIMIT", percentage: "61", usage: -1 },
+          { type: "TIME_LIMIT", unit: 5, number: 1, percentage: 25, usage: 4000, currentValue: 1000, nextResetTime: (NOW + DAY) * 1000 },
+        ],
+      },
+    };
+    const snapshot = await fetchZaiQuotaSnapshot(
+      zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
+    );
+
+    assert.equal(snapshot.status, "available");
+    if (snapshot.status !== "available") return;
+    assert.deepEqual(snapshot.windows, [
       {
-        id: "zai-time-limit",
-        providerLabel: "Z.AI time telemetry",
-        percent: 25,
-        counters: { usage: 3 },
-        semantics: "unknown",
+        id: `zai-TIME_LIMIT-5-1-${(NOW + DAY) * 1000}`,
+        label: "30d",
+        remainingPercent: 75,
+        durationSeconds: 30 * DAY,
+        resetAtSeconds: NOW + DAY,
       },
     ]);
   });
 
-  it("returns schema-drift when no telemetry validates", async () => {
+  it("returns schema-drift when no window validates", async () => {
     for (const payload of [
       {},
       { data: {} },
@@ -99,22 +316,6 @@ describe("Z.AI adapter: schema validation", () => {
       zaiDeps({ fetchFn: stubFetch(() => new Response("<html>", { status: 200 })).fetchFn }),
     );
     assertUnavailable(nonJson, "schema-drift");
-  });
-
-  it("fails closed when duplicate known types have indistinguishable semantics", async () => {
-    const payload = {
-      data: {
-        limits: [
-          { type: "TOKENS_LIMIT", percentage: 61 },
-          { type: "TOKENS_LIMIT", percentage: 18 },
-        ],
-      },
-    };
-    const snapshot = await fetchZaiQuotaSnapshot(
-      zaiDeps({ fetchFn: stubFetch(() => jsonResponse(200, payload)).fetchFn }),
-    );
-
-    assertUnavailable(snapshot, "ambiguous");
   });
 });
 

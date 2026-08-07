@@ -82,7 +82,7 @@ describe("quota detail command", () => {
       assert.match(details, /Kimi For Coding/u);
       assert.match(details, /Z\.AI/u);
       assert.match(details, /5h: 58% remaining/u);
-      assert.match(details, /Unknown semantics:/u);
+      assert.match(details, /30d: 55% remaining/u);
 
       await host.runCommand("quota", "", ctx);
       assert.equal(urls.length, 3);
