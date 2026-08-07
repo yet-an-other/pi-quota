@@ -196,9 +196,11 @@ export async function fetchZaiQuotaSnapshot(deps: ProviderAdapterDeps): Promise<
     return unavailable("auth-unavailable");
   }
   if (auth === undefined) return unavailable("auth-unavailable");
-  // Pi's built-in global provider resolves a raw API key. An authorization
-  // header leaves the monitor endpoint's undocumented auth convention
-  // ambiguous, so never guess or cycle credential formats.
+  // The monitor endpoint takes the raw token verbatim with no Bearer prefix,
+  // matching the official Z.AI coding plugin; Pi's built-in global provider
+  // resolves exactly such a raw API key. A pre-attached Authorization header
+  // would be in an unknown format that need not match the monitor convention,
+  // so refuse it rather than guessing or cycling credential formats.
   if (hasAuthorizationHeader(auth.headers)) return unavailable("ambiguous");
   if (typeof auth.apiKey !== "string" || auth.apiKey.trim() === "") {
     return unavailable("auth-unavailable");
@@ -223,7 +225,7 @@ export async function fetchZaiQuotaSnapshot(deps: ProviderAdapterDeps): Promise<
     return unavailable("transient");
   }
 
-  if (response.status === 401 || response.status === 403) return unavailable("ambiguous");
+  if (response.status === 401 || response.status === 403) return unavailable("auth-required");
   if (response.status === 404) return unavailable("unsupported");
   if (!response.ok) return unavailable("transient");
 

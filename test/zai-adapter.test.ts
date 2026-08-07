@@ -422,12 +422,12 @@ describe("Z.AI adapter: authentication", () => {
     assert.equal(calls.length, 0);
   });
 
-  it("treats monitor authentication responses as ambiguous without retrying another format", async () => {
+  it("maps monitor authentication rejections to auth-required without retrying another format", async () => {
     for (const status of [401, 403]) {
       const { fetchFn, calls } = stubFetch(() => jsonResponse(status, {}));
       const snapshot = await fetchZaiQuotaSnapshot(zaiDeps({ fetchFn }));
 
-      assertUnavailable(snapshot, "ambiguous");
+      assertUnavailable(snapshot, "auth-required");
       assert.equal(calls.length, 1);
     }
   });

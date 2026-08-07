@@ -48,7 +48,7 @@ describe("Z.AI footer status", () => {
     assert.deepEqual(statusCalls, [{ id: "pi-quota", text: undefined }]);
   });
 
-  it("renders nothing for ambiguous monitor authentication", async () => {
+  it("renders nothing when monitor authentication is rejected", async () => {
     const host = createExtensionHost();
     const deps = extensionDeps(() => jsonResponse(403, {}));
     registerExtension(host.api, deps);
