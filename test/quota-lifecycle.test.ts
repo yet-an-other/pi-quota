@@ -520,6 +520,73 @@ describe("quota lifecycle: manual refresh", () => {
   });
 });
 
+describe("quota lifecycle: refresh all providers", () => {
+  it("returns each provider's own refresh result, including degraded snapshots", async () => {
+    const snapshots: Record<string, QuotaSnapshot> = {
+      "openai-codex": {
+        status: "available",
+        provider: "openai-codex",
+        windows: [],
+        source: { kind: "experimental", fetchedAtSeconds: NOW },
+      },
+      "kimi-coding": {
+        status: "degraded",
+        provider: "kimi-coding",
+        telemetry: [{ id: "usage", providerLabel: "usage", semantics: "unknown" }],
+        source: { kind: "experimental", fetchedAtSeconds: NOW },
+      },
+      zai: {
+        status: "unavailable",
+        provider: "zai",
+        reason: "transient",
+        source: { kind: "experimental", fetchedAtSeconds: NOW },
+      },
+    };
+    const fetchSnapshot = async (host: QuotaLifecycleHost): Promise<QuotaSnapshot> =>
+      snapshots[host.provider!]!;
+    const lifecycle = new QuotaLifecycle({
+      fetchFn: (async () => {
+        throw new Error("provider router should be replaced");
+      }) as typeof fetch,
+      fetchSnapshot,
+      nowSeconds: () => NOW,
+    });
+    const hosts: QuotaLifecycleHost[] = [
+      createHost(),
+      createKimiHost(),
+      { ...createHost(), provider: "zai", providerBaseUrl: "https://api.z.ai" },
+    ];
+
+    const results = await lifecycle.refreshAllProviders(hosts);
+
+    assert.deepEqual(
+      results.map((result) => result?.current?.status),
+      ["available", "degraded", "unavailable"],
+    );
+  });
+
+  it("reports a discarded refresh as not refreshed rather than reusing stale state", async () => {
+    const response = deferred<Response>();
+    let fetches = 0;
+    const { fetchFn } = stubFetch(() => {
+      fetches += 1;
+      return fetches === 1 ? jsonResponse(200, VALID_PAYLOAD) : response.promise;
+    });
+    const lifecycle = new QuotaLifecycle({ fetchFn, nowSeconds: () => NOW });
+    const host = createHost();
+
+    lifecycle.sessionStart(host);
+    await flushAsync();
+    assert.equal(lifecycle.getState("openai-codex")?.current?.status, "available");
+
+    const refreshAll = lifecycle.refreshAllProviders([host]);
+    await flushAsync();
+    lifecycle.modelSelect(createKimiHost());
+
+    assert.deepEqual(await refreshAll, [undefined]);
+  });
+});
+
 describe("quota lifecycle: request coalescing", () => {
   it("coalesces repeated triggers into one in-flight provider request", async () => {
     const response = deferred<Response>();

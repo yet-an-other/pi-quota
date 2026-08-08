@@ -12,6 +12,7 @@ import {
   type ScheduleTimeout,
 } from "./quota-lifecycle.ts";
 import { isSupportedProvider, PROVIDER_ADAPTERS } from "./provider-registry.ts";
+import { isRenderableQuotaSnapshot } from "./quota-contract.ts";
 import { renderQuotaDetails } from "./quota-details.ts";
 
 export interface PiQuotaDeps {
@@ -77,8 +78,16 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
   const activeHostFor = (ctx: ExtensionContext) =>
     hostFor(ctx, ctx.model?.provider, ctx.model?.baseUrl);
 
+  const allProviderHostsFor = (ctx: ExtensionContext) =>
+    PROVIDER_ADAPTERS.map(({ id }) => {
+      const baseUrl = ctx.model?.provider === id
+        ? ctx.model.baseUrl
+        : ctx.modelRegistry.getProvider(id)?.baseUrl;
+      return hostFor(ctx, id, baseUrl);
+    });
+
   pi.registerCommand("quota", {
-    description: "Show provider quota details or refresh the active provider",
+    description: "Show provider quota details or refresh provider quota",
     handler: async (args, ctx) => {
       if (ctx.mode !== "tui") return;
 
@@ -86,26 +95,31 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
       if (action === "refresh") {
         if (!isSupportedProvider(ctx.model?.provider)) return;
         const state = await lifecycle.manualRefresh(activeHostFor(ctx), ctx.signal);
-        const refreshed =
-          state?.current?.status === "available" || state?.current?.status === "degraded";
+        const refreshed = isRenderableQuotaSnapshot(state?.current);
         ctx.ui.notify(
           refreshed ? "Quota refreshed" : "Quota refresh failed",
           refreshed ? "info" : "warning",
         );
         return;
       }
+      if (action === "refresh all") {
+        const hosts = allProviderHostsFor(ctx);
+        const results = await lifecycle.refreshAllProviders(hosts, ctx.signal);
+        const available = results.filter((result) =>
+          isRenderableQuotaSnapshot(result?.current)
+        ).length;
+        ctx.ui.notify(
+          `Quota refreshed · ${available}/${hosts.length} providers available`,
+          "info",
+        );
+        return;
+      }
       if (action !== "") {
-        ctx.ui.notify("Usage: /quota [refresh]", "warning");
+        ctx.ui.notify("Usage: /quota [refresh|refresh all]", "warning");
         return;
       }
 
-      const hosts = PROVIDER_ADAPTERS.map(({ id }) => {
-        const baseUrl = ctx.model?.provider === id
-          ? ctx.model.baseUrl
-          : ctx.modelRegistry.getProvider(id)?.baseUrl;
-        return hostFor(ctx, id, baseUrl);
-      });
-      const states = await lifecycle.inspectProviders(hosts, ctx.signal);
+      const states = await lifecycle.inspectProviders(allProviderHostsFor(ctx), ctx.signal);
       const details = renderQuotaDetails(
         states,
         ctx.model?.provider,

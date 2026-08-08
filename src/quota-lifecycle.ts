@@ -2,13 +2,14 @@
  * Provider-agnostic quota refresh lifecycle and session-memory quota state.
  *
  * The lifecycle is event-driven: session/model activation starts one refresh,
- * settled activity may start a throttled refresh, diagnostics lazily fetch
- * missing providers, and shutdown cancels work. It owns timeout, coalescing,
+ * settled activity may start a throttled refresh, manual commands force the
+ * active provider or every provider, diagnostics lazily fetch missing
+ * providers, and shutdown cancels work. It owns timeout, coalescing,
  * cancellation, stale fallback, and failure backoff. No timers survive an
  * in-flight request.
  */
 
-import type { QuotaSnapshot } from "./quota-contract.ts";
+import type { QuotaSnapshot, RenderableQuotaSnapshot } from "./quota-contract.ts";
 import {
   fetchProviderQuotaSnapshot,
   isSupportedProvider,
@@ -25,8 +26,6 @@ import {
 const DEFAULT_TIMEOUT_MS = 8_000;
 const AUTOMATIC_THROTTLE_SECONDS = 60;
 const FAILURE_BACKOFF_SECONDS = [120, 300, 900] as const;
-
-type RenderableQuotaSnapshot = Extract<QuotaSnapshot, { status: "available" | "degraded" }>;
 
 export interface QuotaState {
   readonly provider: string;
@@ -162,6 +161,33 @@ export class QuotaLifecycle {
         signal,
       );
       return this.states.get(provider) ?? state;
+    }));
+  }
+
+  /**
+   * Force-refreshes every given provider concurrently, bypassing throttle and
+   * failure backoff, coalescing per-provider in-flight work, and rendering
+   * the footer only for the active provider. Returns each provider's own
+   * refresh result; a discarded (superseded) refresh yields undefined rather
+   * than a stale state.
+   */
+  async refreshAllProviders(
+    hosts: readonly QuotaLifecycleHost[],
+    signal?: AbortSignal,
+  ): Promise<readonly (QuotaState | undefined)[]> {
+    return Promise.all(hosts.map((host) => {
+      if (!isSupportedProvider(host.provider)) {
+        throw new Error("Refresh-all requires a supported provider host");
+      }
+
+      this.ensureState(host.provider);
+      return this.startRefresh(
+        host,
+        true,
+        false,
+        this.matchesActive(host),
+        signal,
+      ) ?? Promise.resolve(undefined);
     }));
   }
 

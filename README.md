@@ -53,6 +53,10 @@ Fetches any supported providers not yet inspected in this session and opens an a
 
 Forces a refresh of the active supported provider, bypassing automatic throttle and failure backoff. The request completes or times out within eight seconds and reports a sanitized success or failure notification. A matching in-flight refresh is reused.
 
+### `/quota refresh all`
+
+Force-refreshes every supported provider concurrently, bypassing automatic throttle and failure backoff for each, without opening the diagnostic view. It works even when the active provider is unsupported, reuses any per-provider in-flight refresh, and updates the footer only when the active provider is in the refreshed set. When every refresh settles, a single notification reports how many providers returned renderable quota: `Quota refreshed · N/<total> providers available`. A provider without authentication counts as refreshed but not available.
+
 Pi Quota also refreshes on session startup, provider changes, and settled agent work. Settled-work refreshes are throttled for 60 seconds after a successful completion; repeated failures use bounded backoff.
 
 ## Privacy and network behavior
@@ -99,6 +103,7 @@ Automated tests do not contact live providers. Before a release, test with real 
 - [ ] Complete agent work less than 60 seconds after the previous successful refresh; no redundant refresh occurs.
 - [ ] Complete settled agent work after at least 60 seconds; `/quota` shows a newer **Last update** age.
 - [ ] Run `/quota refresh`; it reports success and updates the active provider without clearing the footer while pending.
+- [ ] Run `/quota refresh all`; every supported provider fetches concurrently, the active provider's footer updates, and one notification reports `Quota refreshed · N/<total> providers available` with no provider request duplicated.
 - [ ] Switch Codex → Kimi → Z.AI → Codex; old-provider status clears immediately, late responses do not overwrite the active provider, and each new provider renders only its own data.
 
 ### Failure and degradation

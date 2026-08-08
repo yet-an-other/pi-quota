@@ -90,6 +90,18 @@ export type QuotaSnapshot =
       readonly source: QuotaSourceMeta;
     };
 
+export type RenderableQuotaSnapshot = Extract<
+  QuotaSnapshot,
+  { status: "available" | "degraded" }
+>;
+
+/** Renderable snapshots carry displayable quota data; unavailable ones do not. */
+export function isRenderableQuotaSnapshot(
+  snapshot: QuotaSnapshot | undefined,
+): snapshot is RenderableQuotaSnapshot {
+  return snapshot?.status === "available" || snapshot?.status === "degraded";
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
