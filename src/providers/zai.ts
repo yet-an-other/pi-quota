@@ -18,14 +18,16 @@
 
 import {
   asFiniteNumber,
+  buildQuotaSourceMeta,
   clampRemainingPercent,
   isRecord,
   type ProviderAdapterDeps,
+  type QuotaSourceClassification,
   type QuotaSnapshot,
-  type QuotaSourceMeta,
   type QuotaWindow,
   type ResolvedProviderAuth,
   type UnavailableReason,
+  unavailableSnapshot,
 } from "../quota-contract.ts";
 import { formatWindowDuration } from "../quota-time.ts";
 
@@ -51,25 +53,10 @@ const UNIT_SECONDS: Readonly<Record<number, number>> = {
   6: 7 * 86400,
 };
 
-function zaiQuotaSource(fetchedAtSeconds: number): QuotaSourceMeta {
-  return {
-    kind: "first-party-private",
-    detailUrl: DETAIL_URL,
-    fetchedAtSeconds,
-  };
-}
-
-export function unavailableZaiQuotaSnapshot(
-  reason: UnavailableReason,
-  fetchedAtSeconds: number,
-): QuotaSnapshot {
-  return {
-    status: "unavailable",
-    provider: ZAI_PROVIDER,
-    reason,
-    source: zaiQuotaSource(fetchedAtSeconds),
-  };
-}
+export const ZAI_SOURCE: QuotaSourceClassification = {
+  kind: "first-party-private",
+  detailUrl: DETAIL_URL,
+};
 
 /**
  * Stable window identifier keyed on the distinguishing fields, with the
@@ -195,9 +182,9 @@ function originOf(value: string | undefined): string | undefined {
 
 export async function fetchZaiQuotaSnapshot(deps: ProviderAdapterDeps): Promise<QuotaSnapshot> {
   const nowSeconds = deps.nowSeconds();
-  const source = zaiQuotaSource(nowSeconds);
+  const source = buildQuotaSourceMeta(ZAI_SOURCE, nowSeconds);
   const unavailable = (reason: UnavailableReason) =>
-    unavailableZaiQuotaSnapshot(reason, source.fetchedAtSeconds);
+    unavailableSnapshot(ZAI_PROVIDER, ZAI_SOURCE, reason, source.fetchedAtSeconds);
 
   if (originOf(deps.providerBaseUrl) !== ZAI_ORIGIN) return unavailable("unsupported");
 

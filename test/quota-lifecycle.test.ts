@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { QuotaLifecycle, type QuotaLifecycleHost } from "../src/quota-lifecycle.ts";
+import { QuotaLifecycle } from "../src/quota-lifecycle.ts";
+import type { QuotaHost } from "../src/quota-host.ts";
 import type { QuotaSnapshot } from "../src/quota-contract.ts";
 import { jsonResponse, stubFetch, VALID_PAYLOAD, VALID_TOKEN } from "./codex-fixtures.ts";
 import { VALID_PAYLOAD as KIMI_PAYLOAD } from "./kimi-fixtures.ts";
@@ -50,7 +51,7 @@ class FakeClock {
   }
 }
 
-function createHost(): QuotaLifecycleHost {
+function createHost(): QuotaHost {
   return {
     mode: "tui",
     provider: "openai-codex",
@@ -61,7 +62,7 @@ function createHost(): QuotaLifecycleHost {
   };
 }
 
-function createKimiHost(): QuotaLifecycleHost {
+function createKimiHost(): QuotaHost {
   return {
     mode: "tui",
     provider: "kimi-coding",
@@ -167,7 +168,7 @@ describe("quota lifecycle: stale last renderable state", () => {
       throw new TypeError("network unavailable");
     });
     const statusCalls: Array<string | undefined> = [];
-    const host: QuotaLifecycleHost = {
+    const host: QuotaHost = {
       ...createHost(),
       ui: { setStatus: (_id, text) => statusCalls.push(text) },
       theme: { fg: (color, text) => `[${color}:${text}]` },
@@ -199,7 +200,7 @@ describe("quota lifecycle: session-memory state", () => {
       return fetches === 1 ? jsonResponse(200, VALID_PAYLOAD) : jsonResponse(500, {});
     });
     const statusCalls: Array<string | undefined> = [];
-    const host: QuotaLifecycleHost = {
+    const host: QuotaHost = {
       ...createHost(),
       ui: { setStatus: (_id, text) => statusCalls.push(text) },
     };
@@ -221,7 +222,7 @@ describe("quota lifecycle: session-memory state", () => {
 describe("quota lifecycle: unsupported providers", () => {
   it("clears the footer without recording unavailable state or fetching", async () => {
     const statusCalls: Array<string | undefined> = [];
-    const supportedHost: QuotaLifecycleHost = {
+    const supportedHost: QuotaHost = {
       ...createHost(),
       ui: { setStatus: (_id, text) => statusCalls.push(text) },
     };
@@ -232,7 +233,7 @@ describe("quota lifecycle: unsupported providers", () => {
     await flushAsync();
     assert.notEqual(statusCalls.at(-1), undefined);
 
-    const unsupportedHost: QuotaLifecycleHost = {
+    const unsupportedHost: QuotaHost = {
       ...supportedHost,
       provider: "anthropic",
       providerBaseUrl: "https://api.anthropic.com",
@@ -285,15 +286,9 @@ describe("quota lifecycle: provider contract mismatch", () => {
     const fetchSnapshot = async (): Promise<QuotaSnapshot> => {
       fetches += 1;
       return {
-        status: "degraded",
+        status: "unavailable",
         provider: "kimi-coding",
-        telemetry: [
-          {
-            id: "mismatched",
-            providerLabel: "mismatched",
-            semantics: "unknown",
-          },
-        ],
+        reason: "transient",
         source: { kind: "experimental", fetchedAtSeconds: NOW },
       };
     };
@@ -418,7 +413,7 @@ describe("quota lifecycle: diagnostics", () => {
   it("lazily fetches missing provider states in parallel", async () => {
     const started: string[] = [];
     const pending = new Map<string, ReturnType<typeof deferred<QuotaSnapshot>>>();
-    const fetchSnapshot = (host: QuotaLifecycleHost): Promise<QuotaSnapshot> => {
+    const fetchSnapshot = (host: QuotaHost): Promise<QuotaSnapshot> => {
       const provider = host.provider!;
       started.push(provider);
       const request = deferred<QuotaSnapshot>();
@@ -430,7 +425,7 @@ describe("quota lifecycle: diagnostics", () => {
       fetchSnapshot,
       nowSeconds: () => NOW,
     });
-    const hosts: QuotaLifecycleHost[] = [
+    const hosts: QuotaHost[] = [
       createHost(),
       createKimiHost(),
       { ...createHost(), provider: "zai", providerBaseUrl: "https://api.z.ai" },
@@ -458,7 +453,7 @@ describe("quota lifecycle: diagnostics", () => {
     const clock = new FakeClock();
     let requestSignal: AbortSignal | undefined;
     const fetchSnapshot = async (
-      _host: QuotaLifecycleHost,
+      _host: QuotaHost,
       _deps: unknown,
       signal: AbortSignal,
     ): Promise<QuotaSnapshot> => {
@@ -521,7 +516,7 @@ describe("quota lifecycle: manual refresh", () => {
 });
 
 describe("quota lifecycle: refresh all providers", () => {
-  it("returns each provider's own refresh result, including degraded snapshots", async () => {
+  it("returns each provider's own refresh result", async () => {
     const snapshots: Record<string, QuotaSnapshot> = {
       "openai-codex": {
         status: "available",
@@ -530,9 +525,9 @@ describe("quota lifecycle: refresh all providers", () => {
         source: { kind: "experimental", fetchedAtSeconds: NOW },
       },
       "kimi-coding": {
-        status: "degraded",
+        status: "available",
         provider: "kimi-coding",
-        telemetry: [{ id: "usage", providerLabel: "usage", semantics: "unknown" }],
+        windows: [{ id: "kimi-weekly", label: "7d", remainingPercent: 50, durationSeconds: 604800 }],
         source: { kind: "experimental", fetchedAtSeconds: NOW },
       },
       zai: {
@@ -542,7 +537,7 @@ describe("quota lifecycle: refresh all providers", () => {
         source: { kind: "experimental", fetchedAtSeconds: NOW },
       },
     };
-    const fetchSnapshot = async (host: QuotaLifecycleHost): Promise<QuotaSnapshot> =>
+    const fetchSnapshot = async (host: QuotaHost): Promise<QuotaSnapshot> =>
       snapshots[host.provider!]!;
     const lifecycle = new QuotaLifecycle({
       fetchFn: (async () => {
@@ -551,7 +546,7 @@ describe("quota lifecycle: refresh all providers", () => {
       fetchSnapshot,
       nowSeconds: () => NOW,
     });
-    const hosts: QuotaLifecycleHost[] = [
+    const hosts: QuotaHost[] = [
       createHost(),
       createKimiHost(),
       { ...createHost(), provider: "zai", providerBaseUrl: "https://api.z.ai" },
@@ -561,7 +556,7 @@ describe("quota lifecycle: refresh all providers", () => {
 
     assert.deepEqual(
       results.map((result) => result?.current?.status),
-      ["available", "degraded", "unavailable"],
+      ["available", "available", "unavailable"],
     );
   });
 

@@ -2,7 +2,7 @@
  * Quota footer: owns the footer status end to end.
  *
  * Text composition (glyph, quota window labels, reset countdowns, width
- * degradation), tone (normal/muted/stale), severity coloring (error under
+ * degradation), tone (normal/stale), severity coloring (error under
  * 10% remaining, warning under 20%, success otherwise), theme painting, and
  * the host status call all live here. At most two validated quota windows
  * are shown, ordered by ascending duration. Unavailable quota renders
@@ -10,7 +10,7 @@
  * UI) is injected, so rendering stays testable without a TUI.
  */
 
-import type { ProviderStatusHost } from "./provider-registry.ts";
+import type { QuotaHost } from "./quota-host.ts";
 import {
   orderQuotaWindows,
   type QuotaSnapshot,
@@ -38,7 +38,7 @@ export interface RenderedQuotaStatus {
   readonly glyph: string;
   readonly text: string;
   readonly segments: readonly StatusSegment[];
-  readonly tone: "normal" | "muted" | "stale";
+  readonly tone: "normal" | "stale";
 }
 
 export interface RenderOptions {
@@ -70,15 +70,6 @@ export function renderQuotaStatus(
 ): RenderedQuotaStatus | undefined {
   if (snapshot.status === "unavailable") return undefined;
 
-  if (snapshot.status === "degraded") {
-    return {
-      glyph: QUOTA_GLYPH,
-      text: "telemetry",
-      segments: [{ role: "value", text: "telemetry" }],
-      tone: options.stale ? "stale" : "muted",
-    };
-  }
-
   const windows = orderQuotaWindows(snapshot.windows).slice(0, 2);
   if (windows.length === 0) return undefined;
 
@@ -109,7 +100,7 @@ export function renderQuotaStatus(
   };
 }
 
-type Theme = ProviderStatusHost["theme"];
+type Theme = QuotaHost["theme"];
 
 /** Maps remaining quota onto a severity color: error under 10%, warning under 20%. */
 function severityColor(
@@ -131,9 +122,9 @@ function paintValue(theme: Theme, text: string, remainingPercent: number | undef
 }
 
 function paintText(theme: Theme, rendered: RenderedQuotaStatus): string {
-  // Stale and muted tones keep a single flat color so freshness stays legible.
+  // Stale tone keeps a single flat color so freshness stays legible.
   if (rendered.tone !== "normal") {
-    return theme.fg(rendered.tone === "stale" ? "muted" : "dim", rendered.text);
+    return theme.fg("muted", rendered.text);
   }
   // Labels take the success color; dividers match pi's own footer dividers;
   // values take the severity color of their window.
@@ -152,12 +143,12 @@ export interface StatusPresenterDeps {
   readonly width?: number;
 }
 
-export function clearProviderStatus(host: ProviderStatusHost): void {
+export function clearProviderStatus(host: QuotaHost): void {
   if (host.mode === "tui") host.ui.setStatus(PROVIDER_STATUS_ID, undefined);
 }
 
 export function renderProviderStatus(
-  host: ProviderStatusHost,
+  host: QuotaHost,
   snapshot: QuotaSnapshot,
   deps: StatusPresenterDeps,
   stale: boolean,
@@ -174,8 +165,7 @@ export function renderProviderStatus(
     return;
   }
 
-  const glyphColor =
-    rendered.tone === "stale" ? "warning" : rendered.tone === "muted" ? "muted" : "success";
+  const glyphColor = rendered.tone === "stale" ? "warning" : "success";
   const glyph = host.theme.fg(glyphColor, rendered.glyph);
   host.ui.setStatus(PROVIDER_STATUS_ID, `${glyph} ${paintText(host.theme, rendered)}`);
 }

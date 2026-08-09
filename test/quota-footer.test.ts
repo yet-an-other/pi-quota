@@ -61,23 +61,6 @@ describe("quota footer rendering", () => {
     assert.equal(rendered.tone, "stale");
   });
 
-  it("renders degraded snapshots as a muted telemetry indicator", () => {
-    const snapshot: QuotaSnapshot = {
-      status: "degraded",
-      provider: "zai",
-      telemetry: [{ id: "zai-usage", providerLabel: "Z.AI", percent: 61, semantics: "unknown" }],
-      source: SOURCE,
-    };
-
-    const rendered = renderQuotaStatus(snapshot, { nowSeconds: NOW });
-
-    assert.deepEqual(rendered, {
-      glyph: QUOTA_GLYPH,
-      text: "telemetry",
-      segments: [{ role: "value", text: "telemetry" }],
-      tone: "muted",
-    });
-  });
 });
 
 describe("quota footer width fallbacks", () => {

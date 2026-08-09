@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  buildQuotaSourceMeta,
   clampRemainingPercent,
   isRecord,
   asFiniteNumber,
   orderQuotaWindows,
+  unavailableSnapshot,
+  type QuotaSourceClassification,
   type QuotaWindow,
 } from "../src/quota-contract.ts";
 
@@ -55,5 +58,39 @@ describe("quota contract validation", () => {
       ordered.map((w) => w.id),
       ["five-hour", "weekly", "weekly-tie", "unknown-a", "unknown-b"],
     );
+  });
+
+  it("stamps a fetch timestamp onto a static source classification", () => {
+    const classification: QuotaSourceClassification = {
+      kind: "first-party-private",
+      detailUrl: "https://example.test/usage",
+    };
+    assert.deepEqual(buildQuotaSourceMeta(classification, 1_700_000_000), {
+      kind: "first-party-private",
+      detailUrl: "https://example.test/usage",
+      fetchedAtSeconds: 1_700_000_000,
+    });
+  });
+
+  it("omits detailUrl from built source meta when the classification has none", () => {
+    const meta = buildQuotaSourceMeta({ kind: "experimental" }, 100);
+    assert.equal(meta.kind, "experimental");
+    assert.equal(meta.detailUrl, undefined);
+    assert.equal(meta.fetchedAtSeconds, 100);
+  });
+
+  it("builds an unavailable snapshot from a provider's static source identity", () => {
+    const snapshot = unavailableSnapshot(
+      "zai",
+      { kind: "first-party-private", detailUrl: "https://example.test" },
+      "transient",
+      1_700_000_000,
+    );
+    assert.equal(snapshot.status, "unavailable");
+    if (snapshot.status !== "unavailable") return;
+    assert.equal(snapshot.provider, "zai");
+    assert.equal(snapshot.reason, "transient");
+    assert.equal(snapshot.source.kind, "first-party-private");
+    assert.equal(snapshot.source.fetchedAtSeconds, 1_700_000_000);
   });
 });

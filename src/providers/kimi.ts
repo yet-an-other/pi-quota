@@ -9,13 +9,15 @@
 
 import {
   asFiniteNumber,
+  buildQuotaSourceMeta,
   isRecord,
   type ProviderAdapterDeps,
+  type QuotaSourceClassification,
   type QuotaSnapshot,
-  type QuotaSourceMeta,
   type QuotaWindow,
   type ResolvedProviderAuth,
   type UnavailableReason,
+  unavailableSnapshot,
 } from "../quota-contract.ts";
 import { formatWindowDuration } from "../quota-time.ts";
 
@@ -26,25 +28,10 @@ const USAGE_URL = `${KIMI_ORIGIN}/coding/v1/usages`;
 const DETAIL_URL = "https://www.kimi.com/code";
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
 
-function kimiQuotaSource(fetchedAtSeconds: number): QuotaSourceMeta {
-  return {
-    kind: "experimental",
-    detailUrl: DETAIL_URL,
-    fetchedAtSeconds,
-  };
-}
-
-export function unavailableKimiQuotaSnapshot(
-  reason: UnavailableReason,
-  fetchedAtSeconds: number,
-): QuotaSnapshot {
-  return {
-    status: "unavailable",
-    provider: KIMI_PROVIDER,
-    reason,
-    source: kimiQuotaSource(fetchedAtSeconds),
-  };
-}
+export const KIMI_SOURCE: QuotaSourceClassification = {
+  kind: "experimental",
+  detailUrl: DETAIL_URL,
+};
 
 function nonnegativeDecimal(value: unknown): bigint | undefined {
   if (typeof value !== "string" || !/^\d+$/u.test(value)) return undefined;
@@ -130,9 +117,9 @@ function authorizationHeader(auth: ResolvedProviderAuth): string | undefined {
 
 export async function fetchKimiQuotaSnapshot(deps: ProviderAdapterDeps): Promise<QuotaSnapshot> {
   const nowSeconds = deps.nowSeconds();
-  const source = kimiQuotaSource(nowSeconds);
+  const source = buildQuotaSourceMeta(KIMI_SOURCE, nowSeconds);
   const unavailable = (reason: UnavailableReason) =>
-    unavailableKimiQuotaSnapshot(reason, nowSeconds);
+    unavailableSnapshot(KIMI_PROVIDER, KIMI_SOURCE, reason, nowSeconds);
 
   let auth: ResolvedProviderAuth | undefined;
   try {

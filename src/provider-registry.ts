@@ -5,42 +5,33 @@
  * Each adapter contributes one descriptor — id, display label, fetch
  * behavior, and unavailable-snapshot behavior — behind a shared dependencies
  * shape. Everything that enumerates providers derives from this list, so
- * adding a provider means registering one descriptor here. This module also
- * owns the narrow structural seam over the Pi host shared by the lifecycle
- * and the status presenter. Scheduling and state live in the quota lifecycle
- * module; provider-specific endpoint behavior stays in adapters; host
- * presentation lives in the status presenter.
+ * adding a provider means registering one descriptor here. The Pi host seam
+ * itself lives in the quota-host module; this module consumes it for fetch
+ * dispatch. Scheduling and state live in the quota lifecycle module;
+ * provider-specific endpoint behavior stays in adapters; host presentation
+ * lives in the status presenter.
  */
 
+import { CODEX_PROVIDER, CODEX_SOURCE, fetchCodexQuotaSnapshot } from "./providers/codex.ts";
+import { fetchKimiQuotaSnapshot, KIMI_PROVIDER, KIMI_SOURCE } from "./providers/kimi.ts";
+import { fetchZaiQuotaSnapshot, ZAI_PROVIDER, ZAI_SOURCE } from "./providers/zai.ts";
 import {
-  CODEX_PROVIDER,
-  fetchCodexQuotaSnapshot,
-  unavailableCodexQuotaSnapshot,
-} from "./providers/codex.ts";
-import {
-  fetchKimiQuotaSnapshot,
-  KIMI_PROVIDER,
-  unavailableKimiQuotaSnapshot,
-} from "./providers/kimi.ts";
-import {
-  fetchZaiQuotaSnapshot,
-  unavailableZaiQuotaSnapshot,
-  ZAI_PROVIDER,
-} from "./providers/zai.ts";
-import type {
-  ProviderAdapterDeps,
-  QuotaSnapshot,
-  ResolvedProviderAuth,
-  UnavailableReason,
+  unavailableSnapshot,
+  type ProviderAdapterDeps,
+  type QuotaSourceClassification,
+  type QuotaSnapshot,
+  type UnavailableReason,
 } from "./quota-contract.ts";
 import type { NowSeconds } from "./quota-time.ts";
+import type { QuotaHost } from "./quota-host.ts";
 
 /** A provider's quota behavior behind one descriptor. */
 export interface ProviderAdapter {
   readonly id: string;
   readonly label: string;
+  /** Static source identity used to build this provider's quota source meta and unavailable snapshots. */
+  readonly source: QuotaSourceClassification;
   fetch(deps: ProviderAdapterDeps): Promise<QuotaSnapshot>;
-  unavailable(reason: UnavailableReason, fetchedAtSeconds: number): QuotaSnapshot;
 }
 
 /** Stable display order for the integrations supported by pi-quota. */
@@ -48,20 +39,20 @@ export const PROVIDER_ADAPTERS: readonly ProviderAdapter[] = [
   {
     id: CODEX_PROVIDER,
     label: "OpenAI Codex",
+    source: CODEX_SOURCE,
     fetch: fetchCodexQuotaSnapshot,
-    unavailable: unavailableCodexQuotaSnapshot,
   },
   {
     id: KIMI_PROVIDER,
     label: "Kimi For Coding",
+    source: KIMI_SOURCE,
     fetch: fetchKimiQuotaSnapshot,
-    unavailable: unavailableKimiQuotaSnapshot,
   },
   {
     id: ZAI_PROVIDER,
     label: "Z.AI",
+    source: ZAI_SOURCE,
     fetch: fetchZaiQuotaSnapshot,
-    unavailable: unavailableZaiQuotaSnapshot,
   },
 ];
 
@@ -70,21 +61,6 @@ const adaptersById = new Map(PROVIDER_ADAPTERS.map((adapter) => [adapter.id, ada
 /** Looks up the adapter for a provider id; undefined when unsupported. */
 export function providerAdapter(id: string | undefined): ProviderAdapter | undefined {
   return id === undefined ? undefined : adaptersById.get(id);
-}
-
-/** Narrow structural seam over the Pi host so tests can mock it. */
-export interface ProviderStatusHost {
-  readonly mode: string;
-  readonly provider: string | undefined;
-  /** Effective base URL of the active model, supplied by Pi. */
-  readonly providerBaseUrl: string | undefined;
-  readonly ui: {
-    setStatus(id: string, text: string | undefined): void;
-  };
-  readonly theme: {
-    fg(color: string, text: string): string;
-  };
-  resolveAuth(provider: string): Promise<ResolvedProviderAuth | undefined>;
 }
 
 export interface ProviderStatusDeps {
@@ -101,11 +77,14 @@ export function unavailableProviderQuotaSnapshot(
   reason: UnavailableReason,
   fetchedAtSeconds: number,
 ): QuotaSnapshot | undefined {
-  return providerAdapter(provider)?.unavailable(reason, fetchedAtSeconds);
+  const adapter = providerAdapter(provider);
+  return adapter === undefined
+    ? undefined
+    : unavailableSnapshot(adapter.id, adapter.source, reason, fetchedAtSeconds);
 }
 
 export async function fetchProviderQuotaSnapshot(
-  host: ProviderStatusHost,
+  host: QuotaHost,
   deps: ProviderStatusDeps,
   signal: AbortSignal,
 ): Promise<QuotaSnapshot | undefined> {

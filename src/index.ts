@@ -8,9 +8,9 @@ import { Container, matchesKey, Text } from "@earendil-works/pi-tui";
 import {
   QuotaLifecycle,
   type QuotaLifecycleDeps,
-  type QuotaLifecycleHost,
   type ScheduleTimeout,
 } from "./quota-lifecycle.ts";
+import type { QuotaHost } from "./quota-host.ts";
 import { isSupportedProvider, PROVIDER_ADAPTERS } from "./provider-registry.ts";
 import { isRenderableQuotaSnapshot } from "./quota-contract.ts";
 import { renderQuotaDetails } from "./quota-details.ts";
@@ -66,7 +66,7 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
     ctx: ExtensionContext,
     provider: string | undefined,
     providerBaseUrl: string | undefined,
-  ): QuotaLifecycleHost => ({
+  ): QuotaHost => ({
     mode: ctx.mode,
     provider,
     providerBaseUrl,

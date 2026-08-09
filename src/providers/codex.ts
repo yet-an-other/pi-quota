@@ -15,14 +15,16 @@
 import { Buffer } from "node:buffer";
 import {
   asFiniteNumber,
+  buildQuotaSourceMeta,
   clampRemainingPercent,
   isRecord,
   type ProviderAdapterDeps,
+  type QuotaSourceClassification,
   type QuotaSnapshot,
-  type QuotaSourceMeta,
   type QuotaWindow,
   type ResolvedProviderAuth,
   type UnavailableReason,
+  unavailableSnapshot,
 } from "../quota-contract.ts";
 import { formatWindowDuration } from "../quota-time.ts";
 
@@ -32,25 +34,10 @@ const CHATGPT_ORIGIN = "https://chatgpt.com";
 const USAGE_URL = `${CHATGPT_ORIGIN}/backend-api/wham/usage`;
 const DETAIL_URL = "https://chatgpt.com/codex/settings/usage";
 
-function codexQuotaSource(fetchedAtSeconds: number): QuotaSourceMeta {
-  return {
-    kind: "first-party-private",
-    detailUrl: DETAIL_URL,
-    fetchedAtSeconds,
-  };
-}
-
-export function unavailableCodexQuotaSnapshot(
-  reason: UnavailableReason,
-  fetchedAtSeconds: number,
-): QuotaSnapshot {
-  return {
-    status: "unavailable",
-    provider: CODEX_PROVIDER,
-    reason,
-    source: codexQuotaSource(fetchedAtSeconds),
-  };
-}
+export const CODEX_SOURCE: QuotaSourceClassification = {
+  kind: "first-party-private",
+  detailUrl: DETAIL_URL,
+};
 
 /** Derives the ChatGPT account identifier locally from the OAuth token. */
 export function deriveChatGptAccountId(token: string): string | undefined {
@@ -105,9 +92,9 @@ function parseWindow(
 
 export async function fetchCodexQuotaSnapshot(deps: ProviderAdapterDeps): Promise<QuotaSnapshot> {
   const nowSeconds = deps.nowSeconds();
-  const source = codexQuotaSource(nowSeconds);
+  const source = buildQuotaSourceMeta(CODEX_SOURCE, nowSeconds);
   const unavailable = (reason: UnavailableReason) =>
-    unavailableCodexQuotaSnapshot(reason, nowSeconds);
+    unavailableSnapshot(CODEX_PROVIDER, CODEX_SOURCE, reason, nowSeconds);
 
   let auth: ResolvedProviderAuth | undefined;
   try {

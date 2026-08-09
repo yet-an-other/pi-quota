@@ -12,12 +12,8 @@ _Avoid_: Context usage, token count, session cost
 A provider-reported allowance period whose remaining percentage can be calculated with verified semantics and whose reset metadata may be available.
 _Avoid_: Quota bucket, usage period
 
-**Quota telemetry**:
-Provider-reported usage metrics that are valid for display or diagnostics but lack verified semantics needed to calculate remaining quota.
-_Avoid_: Raw usage data, quota estimate
-
 **Quota snapshot**:
-A point-in-time adapter result describing validated quota windows, validated quota telemetry, or why neither is available.
+A point-in-time adapter result describing validated quota windows, or why none are available.
 _Avoid_: Quota response, provider payload
 
 **Provider adapter**:
@@ -31,3 +27,7 @@ _Avoid_: Supported-providers list, provider list
 **Quota state**:
 The extension’s current provider-specific freshness state, combining the latest quota snapshot, the last renderable quota snapshot, stale status, and refresh failure metadata.
 _Avoid_: Quota cache, cached quota
+
+**Quota host**:
+The Pi-side context the quota subsystem reads from at a seam: the active mode, provider, and base URL, the status UI and theme, and provider-auth resolution.
+_Avoid_: Pi context, extension host, host context

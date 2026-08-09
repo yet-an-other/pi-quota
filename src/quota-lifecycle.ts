@@ -15,8 +15,8 @@ import {
   isSupportedProvider,
   unavailableProviderQuotaSnapshot,
   type ProviderStatusDeps,
-  type ProviderStatusHost,
 } from "./provider-registry.ts";
+import type { QuotaHost } from "./quota-host.ts";
 import {
   clearProviderStatus,
   renderProviderStatus,
@@ -38,8 +38,6 @@ export interface QuotaState {
   /** Unix epoch seconds before which automatic triggers are ignored. */
   readonly nextAutomaticAt?: number;
 }
-
-export type QuotaLifecycleHost = ProviderStatusHost;
 
 /** Returns a cancellation function for this request-scoped timeout. */
 export type ScheduleTimeout = (callback: () => void, delayMilliseconds: number) => () => void;
@@ -94,21 +92,21 @@ export class QuotaLifecycle {
   private readonly deps: QuotaLifecycleDeps;
   private readonly states = new Map<string, QuotaState>();
   private readonly inFlight = new Map<string, InFlightEntry>();
-  private activeHost: QuotaLifecycleHost | undefined;
+  private activeHost: QuotaHost | undefined;
 
   constructor(deps: QuotaLifecycleDeps) {
     this.deps = deps;
   }
 
   /** Starts a fresh session-memory lifecycle and refreshes a supported provider. */
-  sessionStart(host: QuotaLifecycleHost, signal?: AbortSignal): void {
+  sessionStart(host: QuotaHost, signal?: AbortSignal): void {
     this.abortAllInFlight();
     this.states.clear();
     this.activate(host, signal);
   }
 
   /** Switches active provider, cancelling stale work and clearing old UI first. */
-  modelSelect(host: QuotaLifecycleHost, signal?: AbortSignal): void {
+  modelSelect(host: QuotaHost, signal?: AbortSignal): void {
     const previousProvider = this.activeHost?.provider;
     this.abortAllInFlight();
     if (
@@ -121,7 +119,7 @@ export class QuotaLifecycle {
   }
 
   /** Refreshes after settled work only when throttle/backoff permits it. */
-  agentSettled(host: QuotaLifecycleHost, signal?: AbortSignal): void {
+  agentSettled(host: QuotaHost, signal?: AbortSignal): void {
     if (!this.matchesActive(host)) return;
     this.activeHost = host;
     this.startRefresh(host, false, true, true, signal);
@@ -129,7 +127,7 @@ export class QuotaLifecycle {
 
   /** Forces the active provider while coalescing with matching in-flight work. */
   async manualRefresh(
-    host: QuotaLifecycleHost,
+    host: QuotaHost,
     signal?: AbortSignal,
   ): Promise<QuotaState | undefined> {
     if (host.mode !== "tui" || !this.matchesActive(host)) return undefined;
@@ -141,7 +139,7 @@ export class QuotaLifecycle {
    * lazily fetching only providers that have never completed in this session.
    */
   async inspectProviders(
-    hosts: readonly QuotaLifecycleHost[],
+    hosts: readonly QuotaHost[],
     signal?: AbortSignal,
   ): Promise<readonly QuotaState[]> {
     return Promise.all(hosts.map(async (host) => {
@@ -172,7 +170,7 @@ export class QuotaLifecycle {
    * than a stale state.
    */
   async refreshAllProviders(
-    hosts: readonly QuotaLifecycleHost[],
+    hosts: readonly QuotaHost[],
     signal?: AbortSignal,
   ): Promise<readonly (QuotaState | undefined)[]> {
     return Promise.all(hosts.map((host) => {
@@ -217,7 +215,7 @@ export class QuotaLifecycle {
     return initial;
   }
 
-  private activate(host: QuotaLifecycleHost, signal: AbortSignal | undefined): void {
+  private activate(host: QuotaHost, signal: AbortSignal | undefined): void {
     this.activeHost = undefined;
     clearProviderStatus(host);
 
@@ -228,7 +226,7 @@ export class QuotaLifecycle {
     this.startRefresh(host, true, true, true, signal);
   }
 
-  private matchesActive(host: QuotaLifecycleHost): boolean {
+  private matchesActive(host: QuotaHost): boolean {
     return (
       this.activeHost !== undefined &&
       this.activeHost.provider === host.provider &&
@@ -237,7 +235,7 @@ export class QuotaLifecycle {
   }
 
   private startRefresh(
-    host: QuotaLifecycleHost,
+    host: QuotaHost,
     force: boolean,
     requireActive: boolean,
     renderFooter: boolean,
@@ -281,7 +279,7 @@ export class QuotaLifecycle {
 
   private async completeRefresh(
     request: InFlightRequest,
-    host: QuotaLifecycleHost,
+    host: QuotaHost,
   ): Promise<QuotaState | undefined> {
     let snapshot: QuotaSnapshot | undefined;
     try {
@@ -312,7 +310,7 @@ export class QuotaLifecycle {
     if (previous === undefined) return undefined;
 
     const completedAt = this.deps.nowSeconds();
-    if (snapshot.status === "available" || snapshot.status === "degraded") {
+    if (snapshot.status === "available") {
       const next: QuotaState = {
         provider: request.provider,
         current: snapshot,

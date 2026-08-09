@@ -2,8 +2,8 @@
  * Quota details view rendering.
  *
  * The /quota details view shows every provider in the provider registry with
- * its quota state: validated quota windows with reset times, validated quota
- * telemetry under unknown semantics, or a sanitized unavailable reason.
+ * its quota state: validated quota windows with reset times, or a sanitized
+ * unavailable reason.
  * Unavailable quota never renders zero or invented quota. Rendering contains
  * no provider-specific endpoint logic.
  */
@@ -60,18 +60,6 @@ function providerDetailLines(state: QuotaState | undefined, nowSeconds: number):
       ? [`  Unavailable reason: ${UNAVAILABLE_REASON_LABELS[current.reason]}`]
       : []),
   ];
-  if (snapshot.status === "degraded") {
-    lines.push("  Unknown semantics:");
-    for (const telemetry of snapshot.telemetry) {
-      const values = [
-        ...(telemetry.percent === undefined ? [] : [`percentage ${telemetry.percent}%`]),
-        ...Object.entries(telemetry.counters ?? {}).map(([name, value]) => `${name} ${value}`),
-      ];
-      const detail = values.length === 0 ? "" : `: ${values.join(" · ")}`;
-      lines.push(`    ${telemetry.providerLabel}${detail}`);
-    }
-    return lines;
-  }
   if (snapshot.status !== "available") return lines;
 
   lines.push("  Quota windows:");

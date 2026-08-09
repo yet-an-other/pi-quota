@@ -86,36 +86,6 @@ describe("quota detail rendering", () => {
     assert.match(rendered, /5h: 58% remaining/u);
   });
 
-  it("puts validated quota telemetry under an unknown-semantics heading", () => {
-    const degraded: Extract<QuotaSnapshot, { status: "degraded" }> = {
-      status: "degraded",
-      provider: "zai",
-      telemetry: [
-        {
-          id: "zai-token-limit",
-          providerLabel: "Z.AI token telemetry",
-          percent: 61,
-          counters: { currentValue: 120, usage: 80 },
-          semantics: "unknown",
-        },
-      ],
-      source: { kind: "first-party-private", fetchedAtSeconds: NOW },
-    };
-    const state: QuotaState = {
-      provider: "zai",
-      current: degraded,
-      lastRenderable: degraded,
-      stale: false,
-      consecutiveFailures: 0,
-      lastCompletedAt: NOW,
-    };
-
-    const rendered = renderQuotaDetails([state], "zai", NOW);
-
-    assert.match(rendered, /Unknown semantics:/u);
-    assert.match(rendered, /Z\.AI token telemetry: percentage 61% · currentValue 120 · usage 80/u);
-    assert.doesNotMatch(rendered, /remaining|reset/iu);
-  });
 
   it("renders only normalized diagnostic fields and omits sensitive source metadata", () => {
     const snapshot: Extract<QuotaSnapshot, { status: "unavailable" }> = {

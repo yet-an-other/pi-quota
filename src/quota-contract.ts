@@ -39,6 +39,12 @@ export interface QuotaSourceMeta {
   readonly fetchedAtSeconds: number;
 }
 
+/** Static source identity: stability classification and detail link, without a fetch timestamp. */
+export interface QuotaSourceClassification {
+  readonly kind: QuotaSourceKind;
+  readonly detailUrl?: string;
+}
+
 /** A validated provider-reported allowance period. */
 export interface QuotaWindow {
   /** Stable identifier, unique within a provider snapshot. */
@@ -51,15 +57,6 @@ export interface QuotaWindow {
   /** Unix epoch seconds at which the window resets. */
   readonly resetAtSeconds?: number;
   readonly blocked?: boolean;
-}
-
-/** Provider-reported usage metrics whose semantics are not verified. */
-export interface QuotaTelemetry {
-  readonly id: string;
-  readonly providerLabel: string;
-  readonly percent?: number;
-  readonly counters?: Readonly<Record<string, number>>;
-  readonly semantics: "unknown";
 }
 
 export type UnavailableReason =
@@ -78,28 +75,19 @@ export type QuotaSnapshot =
       readonly source: QuotaSourceMeta;
     }
   | {
-      readonly status: "degraded";
-      readonly provider: string;
-      readonly telemetry: readonly QuotaTelemetry[];
-      readonly source: QuotaSourceMeta;
-    }
-  | {
       readonly status: "unavailable";
       readonly provider: string;
       readonly reason: UnavailableReason;
       readonly source: QuotaSourceMeta;
     };
 
-export type RenderableQuotaSnapshot = Extract<
-  QuotaSnapshot,
-  { status: "available" | "degraded" }
->;
+export type RenderableQuotaSnapshot = Extract<QuotaSnapshot, { status: "available" }>;
 
 /** Renderable snapshots carry displayable quota data; unavailable ones do not. */
 export function isRenderableQuotaSnapshot(
   snapshot: QuotaSnapshot | undefined,
 ): snapshot is RenderableQuotaSnapshot {
-  return snapshot?.status === "available" || snapshot?.status === "degraded";
+  return snapshot?.status === "available";
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -133,4 +121,31 @@ export function orderQuotaWindows(windows: readonly QuotaWindow[]): QuotaWindow[
       return a.index - b.index;
     })
     .map(({ quotaWindow }) => quotaWindow);
+}
+
+/** Stamps a fetch timestamp onto a static source classification. */
+export function buildQuotaSourceMeta(
+  classification: QuotaSourceClassification,
+  fetchedAtSeconds: number,
+): QuotaSourceMeta {
+  return {
+    kind: classification.kind,
+    ...(classification.detailUrl === undefined ? {} : { detailUrl: classification.detailUrl }),
+    fetchedAtSeconds,
+  };
+}
+
+/** Builds an unavailable quota snapshot from a provider's static source identity. */
+export function unavailableSnapshot(
+  provider: string,
+  classification: QuotaSourceClassification,
+  reason: UnavailableReason,
+  fetchedAtSeconds: number,
+): QuotaSnapshot {
+  return {
+    status: "unavailable",
+    provider,
+    reason,
+    source: buildQuotaSourceMeta(classification, fetchedAtSeconds),
+  };
 }
