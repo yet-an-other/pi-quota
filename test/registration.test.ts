@@ -11,6 +11,7 @@ describe("extension registration", () => {
 
     assert.deepEqual(host.registeredEvents().sort(), [
       "agent_settled",
+      "agent_start",
       "model_select",
       "session_shutdown",
       "session_start",

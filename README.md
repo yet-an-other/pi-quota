@@ -47,17 +47,11 @@ Narrow terminals drop reset countdowns and then the second window. Failed refres
 
 ### `/quota`
 
-Fetches any supported providers not yet inspected in this session and opens an all-provider diagnostic view. It marks the active provider and shows only normalized status, source stability, freshness, validated windows, or sanitized failure reasons.
+Refreshes every supported provider concurrently on every invocation, then opens the all-provider diagnostic view. It marks the active provider and shows only normalized status, source stability, freshness, validated windows, or sanitized failure reasons. Matching in-flight requests are reused, but completed quota snapshots are never reused as fresh data. The command emits no refresh notification and accepts no arguments.
 
-### `/quota refresh`
+Pi Quota also refreshes on session startup, active model changes, and transitions into and out of agent work. While the model is working, the active provider is requested every minute. After work settles, automatic requests use one-minute, two-minute, five-minute, and then fifteen-minute intervals, continuing at fifteen minutes while idle. A known quota-window reset triggers a request on the next heartbeat at or after that time. Repeated failures use minimum waits of two, five, and fifteen minutes.
 
-Forces a refresh of the active supported provider, bypassing automatic throttle and failure backoff. The request completes or times out within eight seconds and reports a sanitized success or failure notification. A matching in-flight refresh is reused.
-
-### `/quota refresh all`
-
-Force-refreshes every supported provider concurrently, bypassing automatic throttle and failure backoff for each, without opening the diagnostic view. It works even when the active provider is unsupported, reuses any per-provider in-flight refresh, and updates the footer only when the active provider is in the refreshed set. When every refresh settles, a single notification reports how many providers returned renderable quota: `Quota refreshed · N/<total> providers available`. A provider without authentication counts as refreshed but not available.
-
-Pi Quota also refreshes on session startup, provider changes, and settled agent work. Settled-work refreshes are throttled for 60 seconds after a successful completion; repeated failures use bounded backoff.
+The footer redraws every minute from the latest quota snapshot so reset countdowns stay current. A heartbeat redraw does not require a network request. When a request fails after renderable data exists, the footer keeps that data in stale colors and the quota icon changes to the warning color. Background failures do not notify the user.
 
 ## Privacy and network behavior
 
@@ -80,7 +74,7 @@ Run `/quota` to compare all supported providers. Its failure labels distinguish 
 
 ### Stale colors
 
-A refresh failed after the same provider had produced renderable data. Pi Quota preserves that last value rather than clearing it or rendering zero. Run `/quota refresh`; if the provider remains unavailable, the command fails within eight seconds and the stale value remains.
+A refresh failed after the same provider had produced renderable data. Pi Quota preserves that last value rather than clearing it or rendering zero, colors the quota icon as a warning, and stays silent. Run `/quota` to fetch every supported provider and inspect the sanitized failure reason.
 
 ### `/quota` does nothing
 
@@ -100,19 +94,22 @@ Automated tests do not contact live providers. Before a release, test with real 
 ### Refresh lifecycle
 
 - [ ] Let startup finish; quota work does not delay interaction, and a live result appears when available.
-- [ ] Complete agent work less than 60 seconds after the previous successful refresh; no redundant refresh occurs.
-- [ ] Complete settled agent work after at least 60 seconds; `/quota` shows a newer **Last update** age.
-- [ ] Run `/quota refresh`; it reports success and updates the active provider without clearing the footer while pending.
-- [ ] Run `/quota refresh all`; every supported provider fetches concurrently, the active provider's footer updates, and one notification reports `Quota refreshed · N/<total> providers available` with no provider request duplicated.
+- [ ] Start agent work; the active provider refreshes immediately and at each one-minute heartbeat while work continues.
+- [ ] Settle agent work; the active provider refreshes immediately, then idle requests use one-minute, two-minute, five-minute, and fifteen-minute intervals.
+- [ ] Leave the session idle; the footer redraws every minute, and idle refreshes continue at the fifteen-minute ceiling.
+- [ ] Run `/quota`; every supported provider fetches concurrently, completed snapshots are not reused, the details view opens after all requests settle, and no refresh notification appears.
+- [ ] Run `/quota refresh` or `/quota refresh all`; each is rejected with `Usage: /quota` and fetches nothing.
 - [ ] Switch Codex → Kimi → Z.AI → Codex; old-provider status clears immediately, late responses do not overwrite the active provider, and each new provider renders only its own data.
+- [ ] With a known reset earlier than the next idle request, confirm the next heartbeat requests the provider at the reset.
 
 ### Failure and degradation
 
-- [ ] After obtaining renderable Codex or Kimi data, block that provider's quota endpoint and run `/quota refresh`; Pi remains responsive, reports failure within eight seconds, never renders `0%`, and preserves the same-provider value as stale.
-- [ ] Restore the network and refresh again; current rendering replaces the stale state.
+- [ ] After obtaining renderable Codex or Kimi data, block that provider's quota endpoint and wait for an automatic refresh; Pi remains responsive, reports no notification, never renders `0%`, changes the quota icon to the warning color, and preserves the same-provider value as stale.
+- [ ] Run `/quota` while the endpoint remains blocked; the details view shows a sanitized failure reason and the stale footer value remains visible.
+- [ ] Restore the network and run `/quota`; current rendering replaces the stale state.
 - [ ] Switch to an unsupported provider such as Anthropic; the quota footer clears with no Pi Quota error or notification.
 - [ ] Run Pi in print, JSON, and RPC modes; Pi Quota emits no footer, dialog, notification, or provider request.
-- [ ] With global Z.AI active, block its monitor endpoint and run `/quota refresh`; Pi reports failure within eight seconds, renders no invented zero, and preserves any prior Z.AI value as stale.
+- [ ] With global Z.AI active, block its monitor endpoint and wait for an automatic refresh; Pi reports no notification, renders no invented zero, changes the quota icon to the warning color, and preserves any prior Z.AI value as stale.
 
 ### Diagnostics and credential hygiene
 

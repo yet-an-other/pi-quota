@@ -12,7 +12,6 @@ import {
 } from "./quota-lifecycle.ts";
 import type { QuotaHost } from "./quota-host.ts";
 import { isSupportedProvider, PROVIDER_ADAPTERS } from "./provider-registry.ts";
-import { isRenderableQuotaSnapshot } from "./quota-contract.ts";
 import { renderQuotaDetails } from "./quota-details.ts";
 
 export interface PiQuotaDeps {
@@ -20,6 +19,7 @@ export interface PiQuotaDeps {
   readonly nowSeconds?: () => number;
   readonly timeoutMs?: number;
   readonly scheduleTimeout?: ScheduleTimeout;
+  readonly scheduleHeartbeat?: ScheduleTimeout;
 }
 
 async function showQuotaDetails(
@@ -59,6 +59,7 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
     },
     ...(deps.timeoutMs === undefined ? {} : { timeoutMs: deps.timeoutMs }),
     ...(deps.scheduleTimeout === undefined ? {} : { scheduleTimeout: deps.scheduleTimeout }),
+    ...(deps.scheduleHeartbeat === undefined ? {} : { scheduleHeartbeat: deps.scheduleHeartbeat }),
   };
   const lifecycle = new QuotaLifecycle(lifecycleDeps);
 
@@ -75,9 +76,6 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
     resolveAuth: async (provider) => (await ctx.modelRegistry.getProviderAuth(provider))?.auth,
   });
 
-  const activeHostFor = (ctx: ExtensionContext) =>
-    hostFor(ctx, ctx.model?.provider, ctx.model?.baseUrl);
-
   const allProviderHostsFor = (ctx: ExtensionContext) =>
     PROVIDER_ADAPTERS.map(({ id }) => {
       const baseUrl = ctx.model?.provider === id
@@ -87,39 +85,17 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
     });
 
   pi.registerCommand("quota", {
-    description: "Show provider quota details or refresh provider quota",
+    description: "Show current provider quota details",
     handler: async (args, ctx) => {
       if (ctx.mode !== "tui") return;
 
       const action = args.trim();
-      if (action === "refresh") {
-        if (!isSupportedProvider(ctx.model?.provider)) return;
-        const state = await lifecycle.manualRefresh(activeHostFor(ctx), ctx.signal);
-        const refreshed = isRenderableQuotaSnapshot(state?.current);
-        ctx.ui.notify(
-          refreshed ? "Quota refreshed" : "Quota refresh failed",
-          refreshed ? "info" : "warning",
-        );
-        return;
-      }
-      if (action === "refresh all") {
-        const hosts = allProviderHostsFor(ctx);
-        const results = await lifecycle.refreshAllProviders(hosts, ctx.signal);
-        const available = results.filter((result) =>
-          isRenderableQuotaSnapshot(result?.current)
-        ).length;
-        ctx.ui.notify(
-          `Quota refreshed · ${available}/${hosts.length} providers available`,
-          "info",
-        );
-        return;
-      }
       if (action !== "") {
-        ctx.ui.notify("Usage: /quota [refresh|refresh all]", "warning");
+        ctx.ui.notify("Usage: /quota", "warning");
         return;
       }
 
-      const states = await lifecycle.inspectProviders(allProviderHostsFor(ctx), ctx.signal);
+      const states = await lifecycle.refreshProviders(allProviderHostsFor(ctx), ctx.signal);
       const details = renderQuotaDetails(
         states,
         ctx.model?.provider,
@@ -130,13 +106,25 @@ export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = 
   });
 
   pi.on("session_start", (_event, ctx) => {
-    lifecycle.sessionStart(activeHostFor(ctx), ctx.signal);
+    lifecycle.sessionStart(
+      hostFor(ctx, ctx.model?.provider, ctx.model?.baseUrl),
+      ctx.signal,
+    );
   });
   pi.on("model_select", (event, ctx) => {
     lifecycle.modelSelect(hostFor(ctx, event.model.provider, event.model.baseUrl), ctx.signal);
   });
+  pi.on("agent_start", (_event, ctx) => {
+    lifecycle.agentStart(
+      hostFor(ctx, ctx.model?.provider, ctx.model?.baseUrl),
+      ctx.signal,
+    );
+  });
   pi.on("agent_settled", (_event, ctx) => {
-    lifecycle.agentSettled(activeHostFor(ctx), ctx.signal);
+    lifecycle.agentSettled(
+      hostFor(ctx, ctx.model?.provider, ctx.model?.baseUrl),
+      ctx.signal,
+    );
   });
   pi.on("session_shutdown", () => {
     lifecycle.sessionShutdown();
