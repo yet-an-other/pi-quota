@@ -4,10 +4,27 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { QuotaHost } from "../src/quota-host.ts";
 
 export interface StatusCall {
   id: string;
   text: string | undefined;
+}
+
+/** Records final footer delivery with visible, deterministic theme colors. */
+export function createQuotaHost(mode: QuotaHost["mode"] = "tui") {
+  const statusCalls: StatusCall[] = [];
+  const host: QuotaHost = {
+    mode,
+    provider: "openai-codex",
+    providerBaseUrl: undefined,
+    resolveAuth: async () => undefined,
+    ui: {
+      setStatus: (id, text) => { statusCalls.push({ id, text }); },
+    },
+    theme: { fg: (color, text) => `[${color}:${text}]` },
+  };
+  return { host, statusCalls };
 }
 
 export interface ThemeCall {

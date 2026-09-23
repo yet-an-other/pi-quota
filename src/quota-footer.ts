@@ -19,29 +19,29 @@ import {
 import { formatResetCountdown, type NowSeconds } from "./quota-time.ts";
 
 export const PROVIDER_STATUS_ID = "pi-quota";
-export const QUOTA_GLYPH = "◷";
-export const RESET_GLYPH = "↻";
+const QUOTA_GLYPH = "◷";
+const RESET_GLYPH = "↻";
 
 /**
  * Footer text segment: the quota window label, the remaining-quota body, or
  * a divider between quota windows.
  */
-export type StatusSegmentRole = "label" | "value" | "separator";
-export interface StatusSegment {
+type StatusSegmentRole = "label" | "value" | "separator";
+interface StatusSegment {
   readonly role: StatusSegmentRole;
   readonly text: string;
   /** Remaining quota of the quota window this segment belongs to, when applicable. */
   readonly remainingPercent?: number;
 }
 
-export interface RenderedQuotaStatus {
+interface RenderedQuotaStatus {
   readonly glyph: string;
   readonly text: string;
   readonly segments: readonly StatusSegment[];
   readonly tone: "normal" | "stale";
 }
 
-export interface RenderOptions {
+interface RenderOptions {
   readonly nowSeconds: number;
   /** Available footer width in columns; undefined means unbounded. */
   readonly width?: number;
@@ -64,7 +64,7 @@ function windowSegments(
   ];
 }
 
-export function renderQuotaStatus(
+function renderQuotaStatus(
   snapshot: QuotaSnapshot,
   options: RenderOptions,
 ): RenderedQuotaStatus | undefined {
