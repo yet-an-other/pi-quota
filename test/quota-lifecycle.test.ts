@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { QuotaLifecycle } from "../src/quota-lifecycle.ts";
+import { fetchProviderQuotaSnapshot } from "../src/provider-registry.ts";
 import type { QuotaHost } from "../src/quota-host.ts";
 import type { QuotaSnapshot } from "../src/quota-contract.ts";
 import { jsonResponse, stubFetch, VALID_PAYLOAD, VALID_TOKEN } from "./codex-fixtures.ts";
@@ -101,7 +102,7 @@ describe("quota lifecycle: adaptive activity schedule", () => {
     const clock = new FakeClock();
     const { fetchFn, calls } = stubFetch(() => jsonResponse(200, VALID_PAYLOAD));
     const lifecycle = new QuotaLifecycle({
-      fetchFn,
+      fetchSnapshot: (host, signal) => fetchProviderQuotaSnapshot(host, { fetchFn, nowSeconds: () => clock.nowSeconds }, signal),
       nowSeconds: () => clock.nowSeconds,
       scheduleTimeout: clock.scheduleTimeout,
       scheduleHeartbeat: clock.scheduleTimeout,
@@ -132,7 +133,6 @@ describe("quota lifecycle: adaptive activity schedule", () => {
       return availableSnapshot(host.provider!, [], clock.nowSeconds);
     };
     const lifecycle = new QuotaLifecycle({
-      fetchFn: (async () => { throw new Error("provider router should be replaced"); }) as typeof fetch,
       fetchSnapshot,
       nowSeconds: () => clock.nowSeconds,
       scheduleTimeout: clock.scheduleTimeout,
@@ -178,7 +178,6 @@ describe("quota lifecycle: adaptive activity schedule", () => {
       );
     };
     const lifecycle = new QuotaLifecycle({
-      fetchFn: (async () => { throw new Error("provider router should be replaced"); }) as typeof fetch,
       fetchSnapshot,
       nowSeconds: () => clock.nowSeconds,
       scheduleTimeout: clock.scheduleTimeout,
@@ -200,6 +199,108 @@ describe("quota lifecycle: adaptive activity schedule", () => {
   });
 });
 
+describe("quota lifecycle: freshness races", () => {
+  for (const settleBeforeCompletion of [false, true]) {
+    it(`uses the latest activity when an idle request completes${settleBeforeCompletion ? " after returning to idle" : " while working"}`, async () => {
+      const clock = new FakeClock();
+      const pending = deferred<QuotaSnapshot>();
+      let fetches = 0;
+      const host = createHost();
+      const lifecycle = new QuotaLifecycle({
+        fetchSnapshot: async () => ++fetches === 2
+          ? pending.promise
+          : availableSnapshot(host.provider!),
+        nowSeconds: () => clock.nowSeconds,
+        scheduleTimeout: clock.scheduleTimeout,
+        scheduleHeartbeat: clock.scheduleTimeout,
+      });
+
+      lifecycle.sessionStart(host);
+      await flushAsync();
+      await heartbeat(clock);
+      assert.equal(fetches, 2);
+      assert.equal(lifecycle.getState(host.provider!)?.nextAutomaticAt, undefined);
+
+      lifecycle.agentStart(host);
+      if (settleBeforeCompletion) lifecycle.agentSettled(host);
+      const inspection = lifecycle.refreshProviders([host]);
+      await flushAsync();
+      assert.equal(fetches, 2, "activity and inspection share the in-flight request");
+
+      pending.resolve(availableSnapshot(host.provider!));
+      const [state] = await inspection;
+      assert.equal(state?.nextAutomaticAt, NOW + 120);
+      assert.equal(lifecycle.getState(host.provider!)?.nextAutomaticAt, NOW + 120);
+
+      await heartbeat(clock);
+      assert.equal(fetches, 3);
+      assert.equal(
+        lifecycle.getState(host.provider!)?.nextAutomaticAt,
+        NOW + (settleBeforeCompletion ? 240 : 180),
+      );
+      lifecycle.sessionShutdown();
+    });
+  }
+
+  for (const resetAfterSeconds of [120, 180]) {
+    it(`prioritizes a known reset ${resetAfterSeconds === 120 ? "before" : "at"} the failure-backoff deadline`, async () => {
+      const clock = new FakeClock();
+      const host = createHost();
+      let fetches = 0;
+      const lifecycle = new QuotaLifecycle({
+        fetchSnapshot: async () => {
+          fetches += 1;
+          if (fetches === 2) throw new Error("temporary failure");
+          return availableSnapshot(host.provider!, [
+            { id: "short", label: "5h", remainingPercent: 58, resetAtSeconds: NOW + resetAfterSeconds },
+          ]);
+        },
+        nowSeconds: () => clock.nowSeconds,
+        scheduleTimeout: clock.scheduleTimeout,
+        scheduleHeartbeat: clock.scheduleTimeout,
+      });
+
+      lifecycle.sessionStart(host);
+      await flushAsync();
+      await heartbeat(clock);
+      assert.equal(lifecycle.getState(host.provider!)?.nextAutomaticAt, NOW + 180);
+      assert.equal(lifecycle.getState(host.provider!)?.stale, true);
+
+      await heartbeat(clock, (resetAfterSeconds - 60) / 60);
+      assert.equal(fetches, 3);
+      const state = lifecycle.getState(host.provider!);
+      assert.equal(state?.consecutiveFailures, 0);
+      assert.equal(state?.stale, false);
+      assert.equal(state?.nextAutomaticAt, NOW + resetAfterSeconds + 120,
+        "a reset request does not advance the idle stage");
+
+      await heartbeat(clock);
+      assert.equal(fetches, 3, "the past reset is not requested again");
+      lifecycle.sessionShutdown();
+    });
+  }
+
+  it("exposes deadlines only for the active provider", async () => {
+    const clock = new FakeClock();
+    const lifecycle = new QuotaLifecycle({
+      fetchSnapshot: async (host) => availableSnapshot(host.provider!),
+      nowSeconds: () => clock.nowSeconds,
+      scheduleTimeout: clock.scheduleTimeout,
+      scheduleHeartbeat: clock.scheduleTimeout,
+    });
+    lifecycle.sessionStart(createHost());
+    await flushAsync();
+    assert.equal(lifecycle.getState("openai-codex")?.nextAutomaticAt, NOW + 60);
+
+    lifecycle.modelSelect(createKimiHost());
+    await flushAsync();
+    assert.equal(lifecycle.getState("openai-codex")?.current?.status, "available");
+    assert.equal(lifecycle.getState("openai-codex")?.nextAutomaticAt, undefined);
+    assert.equal(lifecycle.getState("kimi-coding")?.nextAutomaticAt, NOW + 60);
+    lifecycle.sessionShutdown();
+  });
+});
+
 describe("quota lifecycle: failure backoff", () => {
   it("uses 2-minute, 5-minute, then capped 15-minute automatic retry delays", async () => {
     const clock = new FakeClock();
@@ -216,7 +317,6 @@ describe("quota lifecycle: failure backoff", () => {
           };
     };
     const lifecycle = new QuotaLifecycle({
-      fetchFn: (async () => { throw new Error("provider router should be replaced"); }) as typeof fetch,
       fetchSnapshot,
       nowSeconds: () => clock.nowSeconds,
       scheduleTimeout: clock.scheduleTimeout,
@@ -263,7 +363,10 @@ describe("quota lifecycle: stale last renderable state", () => {
       ui: { setStatus: (_id, text) => statusCalls.push(text) },
       theme: { fg: (color, text) => `[${color}:${text}]` },
     };
-    const lifecycle = new QuotaLifecycle({ fetchFn, nowSeconds: () => NOW });
+    const lifecycle = new QuotaLifecycle({
+      fetchSnapshot: (host, signal) => fetchProviderQuotaSnapshot(host, { fetchFn, nowSeconds: () => NOW }, signal),
+      nowSeconds: () => NOW,
+    });
 
     lifecycle.sessionStart(host);
     await flushAsync();
@@ -291,7 +394,10 @@ describe("quota lifecycle: session-memory state", () => {
       ...createHost(),
       ui: { setStatus: (_id, text) => statusCalls.push(text) },
     };
-    const lifecycle = new QuotaLifecycle({ fetchFn, nowSeconds: () => NOW });
+    const lifecycle = new QuotaLifecycle({
+      fetchSnapshot: (host, signal) => fetchProviderQuotaSnapshot(host, { fetchFn, nowSeconds: () => NOW }, signal),
+      nowSeconds: () => NOW,
+    });
 
     lifecycle.sessionStart(host);
     await flushAsync();
@@ -316,7 +422,7 @@ describe("quota lifecycle: unsupported providers", () => {
     };
     const { fetchFn, calls } = stubFetch(() => jsonResponse(200, VALID_PAYLOAD));
     const lifecycle = new QuotaLifecycle({
-      fetchFn,
+      fetchSnapshot: (host, signal) => fetchProviderQuotaSnapshot(host, { fetchFn, nowSeconds: () => clock.nowSeconds }, signal),
       nowSeconds: () => clock.nowSeconds,
       scheduleTimeout: clock.scheduleTimeout,
       scheduleHeartbeat: clock.scheduleTimeout,
@@ -355,7 +461,7 @@ describe("quota lifecycle: provider switching", () => {
         : jsonResponse(200, KIMI_PAYLOAD);
     }) as typeof fetch;
     const lifecycle = new QuotaLifecycle({
-      fetchFn,
+      fetchSnapshot: (host, signal) => fetchProviderQuotaSnapshot(host, { fetchFn, nowSeconds: () => NOW }, signal),
       nowSeconds: () => NOW,
       scheduleHeartbeat: (callback, delay) => {
         const timeout = setTimeout(callback, delay);
@@ -397,9 +503,6 @@ describe("quota lifecycle: provider contract mismatch", () => {
       };
     };
     const lifecycle = new QuotaLifecycle({
-      fetchFn: (async () => {
-        throw new Error("provider router should be replaced");
-      }) as typeof fetch,
       fetchSnapshot,
       nowSeconds: () => NOW,
     });
@@ -429,9 +532,6 @@ describe("quota lifecycle: provider contract mismatch", () => {
       };
     };
     const lifecycle = new QuotaLifecycle({
-      fetchFn: (async () => {
-        throw new Error("provider router should be replaced");
-      }) as typeof fetch,
       fetchSnapshot,
       nowSeconds: () => clock.nowSeconds,
       scheduleTimeout: clock.scheduleTimeout,
@@ -461,7 +561,7 @@ describe("quota lifecycle: cancellation", () => {
       return response.promise;
     }) as typeof fetch;
     const lifecycle = new QuotaLifecycle({
-      fetchFn,
+      fetchSnapshot: (host, signal) => fetchProviderQuotaSnapshot(host, { fetchFn, nowSeconds: () => NOW }, signal),
       nowSeconds: () => NOW,
       scheduleHeartbeat: (callback, delay) => {
         const timeout = setTimeout(callback, delay);
@@ -497,7 +597,7 @@ describe("quota lifecycle: cancellation", () => {
     }) as typeof fetch;
     const clock = new FakeClock();
     const lifecycle = new QuotaLifecycle({
-      fetchFn,
+      fetchSnapshot: (host, signal) => fetchProviderQuotaSnapshot(host, { fetchFn, nowSeconds: () => clock.nowSeconds }, signal),
       nowSeconds: () => clock.nowSeconds,
       scheduleTimeout: clock.scheduleTimeout,
       scheduleHeartbeat: clock.scheduleTimeout,
@@ -526,7 +626,7 @@ describe("quota lifecycle: request timeout", () => {
       return new Promise<Response>(() => {});
     }) as typeof fetch;
     const lifecycle = new QuotaLifecycle({
-      fetchFn,
+      fetchSnapshot: (host, signal) => fetchProviderQuotaSnapshot(host, { fetchFn, nowSeconds: () => clock.nowSeconds }, signal),
       nowSeconds: () => clock.nowSeconds,
       scheduleTimeout: clock.scheduleTimeout,
       scheduleHeartbeat: clock.scheduleTimeout,
@@ -558,7 +658,6 @@ describe("quota lifecycle: /quota refresh", () => {
       return availableSnapshot(host.provider!);
     };
     const lifecycle = new QuotaLifecycle({
-      fetchFn: (async () => { throw new Error("provider router should be replaced"); }) as typeof fetch,
       fetchSnapshot,
       nowSeconds: () => NOW,
     });
@@ -589,7 +688,6 @@ describe("quota lifecycle: /quota refresh", () => {
       return request.promise;
     };
     const lifecycle = new QuotaLifecycle({
-      fetchFn: (async () => { throw new Error("provider router should be replaced"); }) as typeof fetch,
       fetchSnapshot,
       nowSeconds: () => NOW,
     });
@@ -621,7 +719,7 @@ describe("quota lifecycle: /quota refresh", () => {
     const response = deferred<Response>();
     const { fetchFn, calls } = stubFetch(() => response.promise);
     const lifecycle = new QuotaLifecycle({
-      fetchFn,
+      fetchSnapshot: (host, signal) => fetchProviderQuotaSnapshot(host, { fetchFn, nowSeconds: () => NOW }, signal),
       nowSeconds: () => NOW,
       scheduleHeartbeat: (callback, delay) => {
         const timeout = setTimeout(callback, delay);
@@ -648,14 +746,12 @@ describe("quota lifecycle: /quota refresh", () => {
     let requestSignal: AbortSignal | undefined;
     const fetchSnapshot = async (
       _host: QuotaHost,
-      _deps: unknown,
       signal: AbortSignal,
     ): Promise<QuotaSnapshot> => {
       requestSignal = signal;
       return new Promise<QuotaSnapshot>(() => {});
     };
     const lifecycle = new QuotaLifecycle({
-      fetchFn: (async () => { throw new Error("provider router should be replaced"); }) as typeof fetch,
       fetchSnapshot,
       nowSeconds: () => clock.nowSeconds,
       scheduleTimeout: clock.scheduleTimeout,

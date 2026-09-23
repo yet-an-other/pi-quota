@@ -11,10 +11,8 @@
 
 import type { QuotaSnapshot, RenderableQuotaSnapshot } from "./quota-contract.ts";
 import {
-  fetchProviderQuotaSnapshot,
   isSupportedProvider,
   unavailableProviderQuotaSnapshot,
-  type ProviderStatusDeps,
 } from "./provider-registry.ts";
 import type { QuotaHost } from "./quota-host.ts";
 import {
@@ -47,24 +45,89 @@ export interface QuotaState {
 /** Returns a cancellation function for this request-scoped timer. */
 export type ScheduleTimeout = (callback: () => void, delayMilliseconds: number) => () => void;
 
-export interface QuotaLifecycleDeps extends ProviderStatusDeps, StatusPresenterDeps {
+export interface QuotaLifecycleDeps extends StatusPresenterDeps {
   readonly timeoutMs?: number;
   /** Schedules one provider-request timeout. */
   readonly scheduleTimeout?: ScheduleTimeout;
   /** Schedules one session heartbeat tick. */
   readonly scheduleHeartbeat?: ScheduleTimeout;
-  /** Provider adapter seam; defaults to the built-in provider router. */
-  readonly fetchSnapshot?: typeof fetchProviderQuotaSnapshot;
+  /** Fetches a normalized snapshot using lifecycle-owned cancellation. */
+  readonly fetchSnapshot: (
+    host: QuotaHost,
+    signal: AbortSignal,
+  ) => Promise<QuotaSnapshot | undefined>;
 }
 
-interface ActiveSchedule {
+/** Owns freshness decisions; request and timer execution remain in the lifecycle. */
+class FreshnessPolicy {
   readonly provider: string;
-  activity: Activity;
-  /** Index of the next idle interval in IDLE_INTERVAL_SECONDS. */
-  idleStage: number;
-  knownResetAt?: number;
-  nextAutomaticAt?: number;
-  generation: number;
+  private activity: Activity = "idle";
+  private idleStage = 0;
+  private revision = Symbol();
+  private knownResetAt: number | undefined;
+  private deadline: number | undefined;
+
+  constructor(
+    provider: string,
+    previousSnapshot: QuotaSnapshot | undefined,
+    nowSeconds: number,
+  ) {
+    this.provider = provider;
+    this.knownResetAt = previousSnapshot === undefined
+      ? undefined
+      : earliestKnownReset(previousSnapshot, nowSeconds);
+  }
+
+  get nextAutomaticAt(): number | undefined {
+    return this.deadline;
+  }
+
+  changeActivity(activity: Activity): boolean {
+    if (this.activity === activity) return false;
+    this.activity = activity;
+    this.idleStage = 0;
+    this.revision = Symbol();
+    this.deadline = undefined;
+    return true;
+  }
+
+  dueTrigger(nowSeconds: number): "reset" | "automatic" | undefined {
+    // A known reset takes precedence over both idle delay and failure backoff.
+    if (this.knownResetAt !== undefined && nowSeconds >= this.knownResetAt) {
+      this.knownResetAt = undefined;
+      return "reset";
+    }
+    return this.deadline !== undefined && nowSeconds >= this.deadline
+      ? "automatic"
+      : undefined;
+  }
+
+  requestStarted(trigger: RefreshTrigger, nowSeconds: number): symbol | undefined {
+    if (this.knownResetAt !== undefined && nowSeconds >= this.knownResetAt) {
+      this.knownResetAt = undefined;
+    }
+    this.deadline = undefined;
+    // Only an automatic idle request may advance its unchanged activity schedule.
+    return trigger === "automatic" && this.activity === "idle" ? this.revision : undefined;
+  }
+
+  complete(
+    idleAttempt: symbol | undefined,
+    snapshot: QuotaSnapshot,
+    completedAt: number,
+    consecutiveFailures: number,
+  ): void {
+    if (snapshot.status === "available") {
+      this.knownResetAt = earliestKnownReset(snapshot, completedAt);
+    }
+    if (idleAttempt === this.revision) {
+      this.idleStage = Math.min(this.idleStage + 1, IDLE_INTERVAL_SECONDS.length - 1);
+    }
+    const normalDelay = this.activity === "working"
+      ? WORKING_INTERVAL_SECONDS
+      : idleDelaySeconds(this.idleStage);
+    this.deadline = completedAt + Math.max(normalDelay, failureDelaySeconds(consecutiveFailures));
+  }
 }
 
 interface InFlightRequest {
@@ -72,9 +135,7 @@ interface InFlightRequest {
   readonly controller: AbortController;
   readonly cancelTimeout: () => void;
   readonly renderFooter: boolean;
-  readonly trigger: RefreshTrigger;
-  readonly scheduleGeneration?: number;
-  readonly activity?: Activity;
+  readonly idleAttempt: symbol | undefined;
 }
 
 interface InFlightEntry {
@@ -83,7 +144,6 @@ interface InFlightEntry {
 }
 
 interface RefreshOptions {
-  readonly force: boolean;
   readonly requireActive: boolean;
   readonly renderFooter: boolean;
   readonly trigger: RefreshTrigger;
@@ -161,13 +221,12 @@ function earliestKnownReset(snapshot: QuotaSnapshot, nowSeconds: number): number
 /** Deep lifecycle module used by the thin Pi event-registration entry. */
 export class QuotaLifecycle {
   private readonly deps: QuotaLifecycleDeps;
-  private readonly states = new Map<string, QuotaState>();
+  private readonly states = new Map<string, Omit<QuotaState, "nextAutomaticAt">>();
   private readonly inFlight = new Map<string, InFlightEntry>();
   private activeHost: QuotaHost | undefined;
-  private activeSchedule: ActiveSchedule | undefined;
+  private activeSchedule: FreshnessPolicy | undefined;
   private heartbeatCancel: (() => void) | undefined;
   private heartbeatToken = 0;
-  private nextScheduleGeneration = 0;
 
   constructor(deps: QuotaLifecycleDeps) {
     this.deps = deps;
@@ -195,32 +254,17 @@ export class QuotaLifecycle {
 
   /** Starts an immediate refresh when the active model begins working. */
   agentStart(host: QuotaHost, _signal?: AbortSignal): void {
-    const schedule = this.activeScheduleFor(host);
-    if (schedule === undefined || schedule.activity === "working") return;
-
-    schedule.activity = "working";
-    schedule.idleStage = 0;
-    schedule.generation = ++this.nextScheduleGeneration;
-    this.setNextAutomaticAt(schedule, undefined);
-    this.startRefresh(host, {
-      force: true,
-      requireActive: true,
-      renderFooter: true,
-      trigger: "activity",
-    });
+    this.changeActivity(host, "working");
   }
 
   /** Starts an immediate refresh when the active model becomes idle. */
   agentSettled(host: QuotaHost, _signal?: AbortSignal): void {
-    const schedule = this.activeScheduleFor(host);
-    if (schedule === undefined || schedule.activity === "idle") return;
+    this.changeActivity(host, "idle");
+  }
 
-    schedule.activity = "idle";
-    schedule.idleStage = 0;
-    schedule.generation = ++this.nextScheduleGeneration;
-    this.setNextAutomaticAt(schedule, undefined);
+  private changeActivity(host: QuotaHost, activity: Activity): void {
+    if (!this.activeScheduleFor(host)?.changeActivity(activity)) return;
     this.startRefresh(host, {
-      force: true,
       requireActive: true,
       renderFooter: true,
       trigger: "activity",
@@ -245,15 +289,14 @@ export class QuotaLifecycle {
 
       const initial = this.ensureState(provider);
       const request = this.startRefresh(host, {
-        force: true,
         requireActive: false,
         renderFooter: this.matchesActive(host),
         trigger: "command",
       });
-      if (request === undefined) return this.states.get(provider) ?? initial;
+      if (request === undefined) return this.getState(provider) ?? initial;
 
       const result = await waitForCompletion(request, signal);
-      return result ?? this.states.get(provider) ?? initial;
+      return result ?? this.getState(provider) ?? initial;
     }));
   }
 
@@ -266,7 +309,13 @@ export class QuotaLifecycle {
 
   /** Read-only state seam for diagnostics and focused tests. */
   getState(provider: string): QuotaState | undefined {
-    return this.states.get(provider);
+    const state = this.states.get(provider);
+    const nextAutomaticAt = this.activeSchedule?.provider === provider
+      ? this.activeSchedule.nextAutomaticAt
+      : undefined;
+    return state === undefined || nextAutomaticAt === undefined
+      ? state
+      : { ...state, nextAutomaticAt };
   }
 
   private ensureState(provider: string): QuotaState {
@@ -290,17 +339,12 @@ export class QuotaLifecycle {
       state.current?.status === "available" ? state.current : undefined
     );
     this.activeHost = host;
-    this.activeSchedule = {
-      provider: host.provider,
-      activity: "idle",
-      idleStage: 0,
-      ...(previousSnapshot === undefined
-        ? {}
-        : { knownResetAt: earliestKnownReset(previousSnapshot, this.deps.nowSeconds()) }),
-      generation: ++this.nextScheduleGeneration,
-    };
+    this.activeSchedule = new FreshnessPolicy(
+      host.provider,
+      previousSnapshot,
+      this.deps.nowSeconds(),
+    );
     this.startRefresh(host, {
-      force: true,
       requireActive: true,
       renderFooter: true,
       trigger: "session-start",
@@ -308,7 +352,7 @@ export class QuotaLifecycle {
     this.startHeartbeat();
   }
 
-  private activeScheduleFor(host: QuotaHost): ActiveSchedule | undefined {
+  private activeScheduleFor(host: QuotaHost): FreshnessPolicy | undefined {
     return this.activeSchedule !== undefined && this.matchesActive(host)
       ? this.activeSchedule
       : undefined;
@@ -320,26 +364,6 @@ export class QuotaLifecycle {
       this.activeHost.provider === host.provider &&
       this.activeHost.providerBaseUrl === host.providerBaseUrl
     );
-  }
-
-  private setNextAutomaticAt(schedule: ActiveSchedule, nextAutomaticAt: number | undefined): void {
-    schedule.nextAutomaticAt = nextAutomaticAt;
-    const state = this.states.get(schedule.provider);
-    if (state === undefined) return;
-
-    if (nextAutomaticAt === undefined) {
-      const { nextAutomaticAt: _previous, ...withoutSchedule } = state;
-      this.states.set(schedule.provider, withoutSchedule);
-    } else {
-      this.states.set(schedule.provider, { ...state, nextAutomaticAt });
-    }
-  }
-
-  private automaticDelaySeconds(schedule: ActiveSchedule, consecutiveFailures: number): number {
-    const normalDelay = schedule.activity === "working"
-      ? WORKING_INTERVAL_SECONDS
-      : idleDelaySeconds(schedule.idleStage);
-    return Math.max(normalDelay, failureDelaySeconds(consecutiveFailures));
   }
 
   private startRefresh(
@@ -354,28 +378,14 @@ export class QuotaLifecycle {
       return undefined;
     }
 
-    const schedule = this.activeSchedule !== undefined && this.matchesActive(host)
-      ? this.activeSchedule
-      : undefined;
-    const nowSeconds = this.deps.nowSeconds();
-    if (schedule?.knownResetAt !== undefined && schedule.knownResetAt <= nowSeconds) {
-      schedule.knownResetAt = undefined;
-    }
-
     const existing = this.inFlight.get(provider);
     if (existing !== undefined) return existing.promise;
+    if (!this.states.has(provider)) return undefined;
 
-    const state = this.states.get(provider);
-    if (state === undefined) return undefined;
-    if (
-      !options.force &&
-      schedule?.nextAutomaticAt !== undefined &&
-      nowSeconds < schedule.nextAutomaticAt
-    ) {
-      return undefined;
-    }
-
-    if (schedule !== undefined) this.setNextAutomaticAt(schedule, undefined);
+    const idleAttempt = this.activeScheduleFor(host)?.requestStarted(
+      options.trigger,
+      this.deps.nowSeconds(),
+    );
 
     const controller = new AbortController();
     const cancelTimeout = (this.deps.scheduleTimeout ?? defaultScheduleTimeout)(
@@ -387,11 +397,7 @@ export class QuotaLifecycle {
       controller,
       cancelTimeout,
       renderFooter: options.renderFooter,
-      trigger: options.trigger,
-      ...(schedule === undefined ? {} : {
-        scheduleGeneration: schedule.generation,
-        activity: schedule.activity,
-      }),
+      idleAttempt,
     };
     const promise = Promise.resolve().then(() => this.completeRefresh(request, host));
     this.inFlight.set(provider, { request, promise });
@@ -405,11 +411,7 @@ export class QuotaLifecycle {
     let snapshot: QuotaSnapshot | undefined;
     try {
       snapshot = await Promise.race([
-        (this.deps.fetchSnapshot ?? fetchProviderQuotaSnapshot)(
-          host,
-          this.deps,
-          request.controller.signal,
-        ),
+        this.deps.fetchSnapshot(host, request.controller.signal),
         aborted(request.controller.signal),
       ]);
     } catch {
@@ -458,7 +460,14 @@ export class QuotaLifecycle {
         };
     this.states.set(request.provider, nextState);
 
-    this.completeSchedule(request, resolvedSnapshot, completedAt, nextState.consecutiveFailures);
+    if (this.activeSchedule?.provider === request.provider) {
+      this.activeSchedule.complete(
+        request.idleAttempt,
+        resolvedSnapshot,
+        completedAt,
+        nextState.consecutiveFailures,
+      );
+    }
     if (
       request.renderFooter &&
       this.matchesActive(host) &&
@@ -466,35 +475,7 @@ export class QuotaLifecycle {
     ) {
       this.renderActiveFooter();
     }
-    return this.states.get(request.provider);
-  }
-
-  private completeSchedule(
-    request: InFlightRequest,
-    snapshot: QuotaSnapshot,
-    completedAt: number,
-    consecutiveFailures: number,
-  ): void {
-    const schedule = this.activeSchedule;
-    if (schedule === undefined || schedule.provider !== request.provider) return;
-
-    if (snapshot.status === "available") {
-      schedule.knownResetAt = earliestKnownReset(snapshot, completedAt);
-    }
-
-    const currentSchedule = request.scheduleGeneration === schedule.generation;
-    if (
-      currentSchedule &&
-      request.trigger === "automatic" &&
-      request.activity === "idle"
-    ) {
-      schedule.idleStage = Math.min(schedule.idleStage + 1, IDLE_INTERVAL_SECONDS.length - 1);
-    }
-
-    this.setNextAutomaticAt(
-      schedule,
-      completedAt + this.automaticDelaySeconds(schedule, consecutiveFailures),
-    );
+    return this.getState(request.provider);
   }
 
   private renderActiveFooter(): void {
@@ -536,24 +517,9 @@ export class QuotaLifecycle {
     if (host === undefined || schedule === undefined) return;
 
     this.renderActiveFooter();
-    const nowSeconds = this.deps.nowSeconds();
-    if (schedule.knownResetAt !== undefined && nowSeconds >= schedule.knownResetAt) {
-      schedule.knownResetAt = undefined;
-      this.startRefresh(host, {
-        force: true,
-        requireActive: true,
-        renderFooter: true,
-        trigger: "reset",
-      });
-      return;
-    }
-    if (schedule.nextAutomaticAt !== undefined && nowSeconds >= schedule.nextAutomaticAt) {
-      this.startRefresh(host, {
-        force: true,
-        requireActive: true,
-        renderFooter: true,
-        trigger: "automatic",
-      });
+    const trigger = schedule.dueTrigger(this.deps.nowSeconds());
+    if (trigger !== undefined) {
+      this.startRefresh(host, { requireActive: true, renderFooter: true, trigger });
     }
   }
 

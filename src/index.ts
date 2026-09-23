@@ -11,7 +11,7 @@ import {
   type ScheduleTimeout,
 } from "./quota-lifecycle.ts";
 import type { QuotaHost } from "./quota-host.ts";
-import { isSupportedProvider, PROVIDER_ADAPTERS } from "./provider-registry.ts";
+import { fetchProviderQuotaSnapshot, isSupportedProvider, PROVIDER_ADAPTERS } from "./provider-registry.ts";
 import { renderQuotaDetails } from "./quota-details.ts";
 
 export interface PiQuotaDeps {
@@ -51,9 +51,13 @@ async function showQuotaDetails(
 }
 
 export default function registerExtension(pi: ExtensionAPI, deps: PiQuotaDeps = {}): void {
-  const lifecycleDeps: QuotaLifecycleDeps = {
+  const providerDeps = {
     fetchFn: deps.fetchFn ?? ((...args: Parameters<typeof fetch>) => fetch(...args)),
     nowSeconds: deps.nowSeconds ?? (() => Math.floor(Date.now() / 1000)),
+  };
+  const lifecycleDeps: QuotaLifecycleDeps = {
+    fetchSnapshot: (host, signal) => fetchProviderQuotaSnapshot(host, providerDeps, signal),
+    nowSeconds: providerDeps.nowSeconds,
     get width() {
       return process.stdout.columns;
     },
